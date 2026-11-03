@@ -1019,7 +1019,7 @@ Two image variants are published. Pick the smallest one that includes what your 
 
 | Tag       | Size (approx.) | Includes                                                                                                                                                                                 | Best for                                                                                        |
 | --------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `:latest` | ~400–500 MB    | Full scientific stack: `numpy`, `pandas`, `scipy`, `matplotlib` + `matplotcheck2`, `seaborn`, `bokeh`, `scikit-learn`, `scikit-image`, `sympy`, `networkx`, `nltk`, `nbformat`, and more | Any course that needs scientific computing, data science, plotting, or Jupyter notebook grading |
+| `:latest` | ~400–500 MB    | Full scientific stack: `numpy`, `pandas`, `scipy`, `matplotlib` + `matplotcheck2`, `seaborn`, `scikit-learn`, `sympy`, `networkx`, `nltk`, `nbformat`, and more | Any course that needs scientific computing, data science, plotting, or Jupyter notebook grading |
 | `:lite`   | ~60–80 MB      | Grader core only: `pytest-prairielearn-grader`, `Pygments`, `beautifulsoup4`, `defusedxml`, `requests`                                                                                   | Introductory CS courses where student code uses only the Python standard library                |
 
 To use the lite image, change the `image` field:

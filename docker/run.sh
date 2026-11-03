@@ -4,7 +4,7 @@
 # INIT
 ##########################
 
-if [[ ! -d /grade ]]; then
+if [ ! -d /grade ]; then
     echo "ERROR: /grade not found! Mounting may have failed."
     exit 1
 fi
