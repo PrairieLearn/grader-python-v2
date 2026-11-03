@@ -741,6 +741,7 @@ def pytest_configure(config: Config) -> None:
 
     # Add a marker for the sandbox fixture to set the initialization timeout
     config.addinivalue_line("markers", "sandbox_timeout(timeout_value): sets a timeout for initialization of the sandbox fixture")
+    config.addinivalue_line("markers", "output(level): controls the detail level of grading failure output")
 
     # Only register our plugin if it hasn't been already (e.g., in case of multiple conftests)
     if not hasattr(config, "result_collector_plugin"):
