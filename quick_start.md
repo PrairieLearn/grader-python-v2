@@ -900,7 +900,7 @@ result = sandbox.query_function("is_valid", data)
 assert_true(result, msg="Expected is_valid() to return True for valid input.")
 ```
 
-**`assert_fn_equal(sandbox, func_name, *, args=(), kwargs=None, expected, msg=None, query_timeout=1.0)`**
+**`assert_fn_equal(sandbox, func_name, *, args=(), kwargs=None, expected, msg=None, description=None, query_timeout=1.0)`**
 
 Call a student function and compare its return value — the most common helper. It
 automatically generates the description from the function call:

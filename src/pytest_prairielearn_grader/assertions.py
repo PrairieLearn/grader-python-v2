@@ -201,6 +201,7 @@ def assert_fn_equal(
     kwargs: dict[str, Any] | None = None,
     expected: Any,
     msg: str | None = None,
+    description: str | None = None,
     query_timeout: float = 1.0,
 ) -> Any:
     """Call a student function and assert its return value equals *expected*.
@@ -228,6 +229,8 @@ def assert_fn_equal(
         The correct / reference return value.
     msg:
         Optional custom failure message.
+    description:
+        Optional label for the ``Checking:`` line. Defaults to the function call.
     query_timeout:
         Timeout in seconds for the function call (default ``1.0``).
 
@@ -244,8 +247,8 @@ def assert_fn_equal(
     """
     call_kwargs = kwargs or {}
     actual = sandbox.query_function(func_name, *args, query_timeout=query_timeout, **call_kwargs)
-    description = _format_call(func_name, args, kwargs)
-    assert_equal(actual, expected, msg=msg, description=description)
+    call_description = description or _format_call(func_name, args, kwargs)
+    assert_equal(actual, expected, msg=msg, description=call_description)
     return actual
 
 
@@ -259,6 +262,7 @@ def assert_fn_approx_equal(
     rtol: float = 1e-5,
     atol: float = 1e-8,
     msg: str | None = None,
+    description: str | None = None,
     query_timeout: float = 1.0,
 ) -> Any:
     """Call a student function and assert its return value is approximately
@@ -273,6 +277,6 @@ def assert_fn_approx_equal(
     """
     call_kwargs = kwargs or {}
     actual = sandbox.query_function(func_name, *args, query_timeout=query_timeout, **call_kwargs)
-    description = _format_call(func_name, args, kwargs)
-    assert_approx_equal(actual, expected, rtol=rtol, atol=atol, msg=msg, description=description)
+    call_description = description or _format_call(func_name, args, kwargs)
+    assert_approx_equal(actual, expected, rtol=rtol, atol=atol, msg=msg, description=call_description)
     return actual
