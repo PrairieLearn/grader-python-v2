@@ -92,8 +92,7 @@ jobs:
           file: ./docker/${{ matrix.dockerfile }}
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/grader-python-pytest:${{ matrix.latest_tag }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/grader-python-pytest:v${{ steps.version.outputs.VERSION }}${{ matrix.version_suffix }}
+            prairielearn/grader-python-pytest:${{ matrix.latest_tag }}
+            prairielearn/grader-python-pytest:v${{ steps.version.outputs.VERSION }}${{ matrix.version_suffix }}
           build-args: |
             PACKAGE_VERSION=${{ steps.version.outputs.VERSION }}
-
