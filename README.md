@@ -169,8 +169,8 @@ mypy src/
 
 ## Docker Images
 
-- `eliotwrobson/grader-python-pytest:latest` — full image with numpy, pandas, matplotlib, sympy
-- `eliotwrobson/grader-python-pytest:lite` — minimal image with core dependencies only
+- `prairielearn/grader-python-pytest:latest` — full image with numpy, pandas, matplotlib, sympy
+- `prairielearn/grader-python-pytest:lite` — minimal image with core dependencies only
 
 ## Related Issues
 
