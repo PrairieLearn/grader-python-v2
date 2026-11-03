@@ -2,7 +2,7 @@
 
 This is a quick start guide for using the new Python autograder for PrairieLearn. This guide
 covers the basic usage and functionality with examples. The grader uses the Docker image
-`eliotwrobson/grader-python-pytest:latest` which is powered by the `pytest-prairielearn-grader`
+`prairielearn/grader-python-pytest:latest` which is powered by the `pytest-prairielearn-grader`
 pytest plugin.
 
 The following discussion is based on converted example questions in PrairieLearn.
@@ -137,7 +137,7 @@ Three fixtures are provided by the `pytest-prairielearn-grader` package:
 4. **`data_json: DataFixture`**: Provides access to parameters from PrairieLearn's `data.json` file
    (generated via `pl-external-grader-variables` and other elements).
 
-For implementation details, see the [fixture source code](https://github.com/eliotwrobson/pl-python-autograder-v2/blob/main/src/pytest_prairielearn_grader/fixture.py).
+For implementation details, see the [fixture source code](https://github.com/prairielearn/grader-python-v2/blob/main/src/pytest_prairielearn_grader/fixture.py).
 
 ## Querying Student Code
 
@@ -992,7 +992,7 @@ The grader automatically serializes/deserializes:
 ## More Examples
 
 To see more examples of what is possible in these test files, look at the test cases in
-[this folder](https://github.com/eliotwrobson/pl-python-autograder-v2/tree/main/tests/scenario_root). Each test file is called `scenario.py`.
+[this folder](https://github.com/prairielearn/grader-python-v2/tree/main/tests/scenario_root). Each test file is called `scenario.py`.
 
 ## PrairieLearn Configuration
 
@@ -1007,7 +1007,7 @@ In your PrairieLearn question's `info.json`, specify the grader image:
   "gradingMethod": "External",
   "externalGradingOptions": {
     "enabled": true,
-    "image": "eliotwrobson/grader-python-pytest:latest",
+    "image": "prairielearn/grader-python-pytest:latest",
     "timeout": 30
   }
 }
@@ -1027,7 +1027,7 @@ To use the lite image, change the `image` field:
 ```json
 "externalGradingOptions": {
   "enabled": true,
-  "image": "eliotwrobson/grader-python-pytest:lite",
+  "image": "prairielearn/grader-python-pytest:lite",
   "timeout": 30
 }
 ```
@@ -1199,7 +1199,7 @@ never reaches the sandbox.
   },
   "externalGradingOptions": {
     "enabled": true,
-    "image": "eliotwrobson/grader-python-pytest:latest",
+    "image": "prairielearn/grader-python-pytest:latest",
     "timeout": 60
   }
 }
@@ -1350,7 +1350,7 @@ questions/my_workspace_question/
   },
   "externalGradingOptions": {
     "enabled": true,
-    "image": "eliotwrobson/grader-python-pytest:latest",
+    "image": "prairielearn/grader-python-pytest:latest",
     "timeout": 30
   }
 }
