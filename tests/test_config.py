@@ -3,6 +3,7 @@
 import pytest
 
 from pytest_prairielearn_grader import ConfigObject
+from pytest_prairielearn_grader.plugin import _calculate_summary_scores
 
 # ---------------------------------------------------------------------------
 # Valid configurations
@@ -253,3 +254,15 @@ def test_output_level_all_valid_values() -> None:
 def test_output_level_invalid_raises() -> None:
     with pytest.raises(ValueError, match="output_level must be one of"):
         ConfigObject(output_level="verbose")  # type: ignore[arg-type]
+
+
+def test_summary_scores_use_test_point_values() -> None:
+    total_score, max_score = _calculate_summary_scores(
+        [
+            {"points": 1.0, "max_points": 1},
+            {"points": 2.0, "max_points": 2},
+            {"points": 3.0, "max_points": 3},
+        ]
+    )
+
+    assert (total_score, max_score) == (6.0, 6)

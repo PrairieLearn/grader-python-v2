@@ -1094,8 +1094,7 @@ def print_autograder_summary(session: pytest.Session, test_results: list[dict[st
     # Can fix this later since most people will just see the output shown in PL.
 
     # Calculate total score
-    total_score = sum(result["points"] for result in test_results)
-    max_score = len(test_results)
+    total_score, max_score = _calculate_summary_scores(test_results)
 
     # Add total score row
     table.add_row(["Total Score", f"{total_score}/{max_score}", ""])
@@ -1154,3 +1153,10 @@ def print_autograder_summary(session: pytest.Session, test_results: list[dict[st
         writer.line(line)
 
     writer.write(f"{os.linesep}Final Grade: {total_score}/{max_score}{os.linesep}", bold=True)
+
+
+def _calculate_summary_scores(test_results: list[dict[str, Any]]) -> tuple[float, float]:
+    return (
+        sum(result["points"] for result in test_results),
+        sum(result["max_points"] for result in test_results),
+    )
