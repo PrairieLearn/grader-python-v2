@@ -91,6 +91,7 @@ jobs:
           context: ./docker
           file: ./docker/${{ matrix.dockerfile }}
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             prairielearn/grader-python-pytest:${{ matrix.latest_tag }}
             prairielearn/grader-python-pytest:v${{ steps.version.outputs.VERSION }}${{ matrix.version_suffix }}

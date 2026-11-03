@@ -1,3 +1,6 @@
+from pathlib import Path
+import subprocess
+import sys
 from typing import Any
 from typing import cast
 
@@ -88,3 +91,61 @@ def test_from_server_json(obj: dict, expected_result: pd.DataFrame) -> None:
 
     # Check if the original and deserialized arrays are equal
     pd.testing.assert_frame_equal(deserialized, expected_result)
+
+
+def test_from_server_json_networkx_graph() -> None:
+    graph = from_server_json(
+        {
+            "_type": "networkx_graph",
+            "_value": {
+                "directed": False,
+                "multigraph": False,
+                "graph": {},
+                "nodes": [{"id": 1}, {"id": 2}],
+                "adjacency": [[{"id": 2}], [{"id": 1}]],
+            },
+        }
+    )
+
+    assert set(graph.nodes) == {1, 2}
+
+
+def test_optional_dependencies_are_declared() -> None:
+    import tomllib
+    from pathlib import Path
+
+    project = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())["project"]
+    requirements = project["dependencies"]
+
+    assert not any(requirement.startswith("networkx") for requirement in requirements)
+    assert "networkx" not in project["optional-dependencies"]
+
+
+def test_json_utils_loads_without_optional_dependencies() -> None:
+    script = """
+import builtins
+import runpy
+from pathlib import Path
+import sys
+
+blocked = {"networkx", "numpy", "pandas", "plot_serializer"}
+original_import = builtins.__import__
+
+
+def block_optional_imports(name, *args, **kwargs):
+    if name.split(".", 1)[0] in blocked:
+        raise AssertionError(f"Unexpected optional dependency import: {name}")
+    return original_import(name, *args, **kwargs)
+
+
+builtins.__import__ = block_optional_imports
+runpy.run_path(Path(sys.argv[1]), run_name="json_utils")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(Path(__file__).parents[1] / "src/pytest_prairielearn_grader/json_utils.py")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
