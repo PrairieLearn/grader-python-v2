@@ -3,11 +3,15 @@ from typing import Any
 import pytest
 
 from pytest_prairielearn_grader.assertions import assert_fn_equal
+from pytest_prairielearn_grader.fixture import _SandboxBase
 
 
-class _Sandbox:
-    def query_function(self, func_name: str, *args: Any, query_timeout: float, **kwargs: Any) -> Any:
-        assert func_name == "add"
+class _Sandbox(_SandboxBase):
+    def __init__(self) -> None:
+        pass
+
+    def query_function(self, function_name: str, *args: Any, query_timeout: float = 1.0, **kwargs: Any) -> Any:
+        assert function_name == "add"
         assert args == (2, 3)
         assert query_timeout == 1.0
         assert not kwargs
