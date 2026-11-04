@@ -5,6 +5,7 @@ import pytest
 
 from pytest_prairielearn_grader.fixture import FeedbackFixture
 from pytest_prairielearn_grader.fixture import StudentFixture
+from pytest_prairielearn_grader.utils import FunctionStatusCode
 
 
 @pytest.mark.grading_data(name="initialization_timeout", points=2)
@@ -45,3 +46,22 @@ def test_query_fast(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
     assert sandbox.query_function("f_fast", 2, y=3, query_timeout=0.5) == 5
     feedback.set_score(0.1)
     assert sandbox.query_function("f_slow", 2, y=3, query_timeout=0.5) == 5
+
+
+@pytest.mark.grading_data(name="raw_function_timeout", points=2)
+def test_raw_function_timeout_preserves_partial_credit(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
+    failures: list[str] = []
+    test_values = [2, 3]
+
+    for n in test_values:
+        response = sandbox.query_function_raw("f_fast" if n == 2 else "f_slow", n, y=3, query_timeout=0.2 if n == 2 else 0.05)
+        if response["status"] == FunctionStatusCode.TIMEOUT:
+            failures.append(f"f({n}) timed out: {response['exception_message']}")
+            break
+
+        assert response["status"] == FunctionStatusCode.SUCCESS
+        assert response["value"] == n + 3
+
+    if failures:
+        feedback.add_message("\n".join(failures))
+    feedback.set_score_final(0.5 if failures else 1.0)

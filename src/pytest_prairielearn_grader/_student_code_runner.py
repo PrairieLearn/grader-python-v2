@@ -100,6 +100,7 @@ async def student_function_runner(
     execution_error = None
     exception_traceback = None
     result = None
+    timed_out = False
 
     try:
 
@@ -111,13 +112,25 @@ async def student_function_runner(
             return student_function(*args_tup, **kwargs_dict)
 
         with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-            result = await asyncio.wait_for(asyncio.get_event_loop().run_in_executor(executor, student_function_temp), timeout=timeout)
+            future = asyncio.get_event_loop().run_in_executor(executor, student_function_temp)
+            done, _ = await asyncio.wait({future}, timeout=timeout)
+            if done:
+                result = future.result()
+            else:
+                execution_error = asyncio.TimeoutError(f"Function timed out after {timeout} seconds")
+                timed_out = True
     except Exception as e:
         execution_error = e
         exception_traceback = traceback.format_exc(limit=-1)
 
     function_response: StudentFunctionResponse = {
-        "status": FunctionStatusCode.SUCCESS if execution_error is None else FunctionStatusCode.EXCEPTION,
+        "status": (
+            FunctionStatusCode.SUCCESS
+            if execution_error is None
+            else FunctionStatusCode.TIMEOUT
+            if timed_out
+            else FunctionStatusCode.EXCEPTION
+        ),
         "value": to_json(result),
         "stdout": stdout_capture.getvalue(),
         "stderr": stderr_capture.getvalue(),

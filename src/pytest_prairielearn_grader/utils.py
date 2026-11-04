@@ -30,6 +30,10 @@ class QueryStatusCode(StrEnum):
 class FunctionStatusCode(StrEnum):
     """
     Status codes for a function execution.
+
+    A timeout indicates that the function call did not produce a response within
+    the requested interval. Callers must stop issuing requests on that sandbox
+    after receiving this status.
     """
 
     SUCCESS = "success"

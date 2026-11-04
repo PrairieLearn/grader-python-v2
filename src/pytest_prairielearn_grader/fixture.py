@@ -10,6 +10,7 @@ from typing import Any
 from typing import NamedTuple
 
 from .json_utils import from_json
+from .utils import FunctionStatusCode
 from .utils import ProcessStartRequest
 from .utils import ProcessStartResponse
 from .utils import ProcessStatusCode
@@ -249,6 +250,13 @@ class _SandboxBase:
     def query_function_raw(
         self, function_name: str, *args: Any, query_timeout: float = DEFAULT_TIMEOUT, **kwargs: Any
     ) -> StudentFunctionResponse:
+        """Call a student function and return its protocol response.
+
+        A socket timeout is returned as ``FunctionStatusCode.TIMEOUT`` rather
+        than raised. Callers must stop issuing requests on this sandbox after a
+        timeout because the student process may still write the timed-out
+        request's response.
+        """
         json_message = StudentFunctionRequest(
             message_type="query_function",
             function_name=function_name,
@@ -259,7 +267,18 @@ class _SandboxBase:
         assert self.student_socket is not None
         self.student_socket.settimeout(query_timeout)
         self.student_socket.sendall((json.dumps(json_message) + os.linesep).encode("utf-8"))
-        data: StudentFunctionResponse = json.loads(self._read_from_socket().decode())
+        try:
+            data: StudentFunctionResponse = json.loads(self._read_from_socket().decode())
+        except TimeoutError as error:
+            data = {
+                "status": FunctionStatusCode.TIMEOUT,
+                "value": None,
+                "stdout": "",
+                "stderr": "",
+                "exception_name": type(error).__name__,
+                "exception_message": str(error),
+                "traceback": None,
+            }
         if data.get("stdout"):
             self._accumulated_stdout.append(data["stdout"])
         return data
@@ -268,14 +287,14 @@ class _SandboxBase:
         """Call a function in the student sandbox and return its value."""
         response = self.query_function_raw(function_name, *args, query_timeout=query_timeout, **kwargs)
         match response["status"]:
-            case "exception":
+            case FunctionStatusCode.EXCEPTION:
                 raise RuntimeError(
                     f"Function '{function_name}' raised an exception "
                     f"{response['exception_name']}: {response['exception_message']}\n{response['traceback']}"
                 )
-            case "timeout":
+            case FunctionStatusCode.TIMEOUT:
                 raise TimeoutError(f"Query for function '{function_name}' timed out after {query_timeout} seconds.")
-            case "not_found":
+            case FunctionStatusCode.NOT_FOUND:
                 raise NameError(f"Query for function '{function_name}' failed: {response['exception_message']}")
         return from_json(response["value"])
 
