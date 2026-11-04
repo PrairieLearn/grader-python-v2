@@ -97,8 +97,8 @@ async def student_function_runner(
 ) -> StudentFunctionResponse:
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
-    execution_error = None
-    exception_traceback = None
+    execution_error: Exception | None = None
+    exception_traceback: str | None = None
     result = None
     timed_out = False
 
