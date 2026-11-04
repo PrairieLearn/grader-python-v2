@@ -1,0 +1,47 @@
+{
+  "expected_data_object": {
+    "score": 1.0,
+    "tests": [
+      {
+        "max_points": 1,
+        "name": "data_values",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_setup_snapshot.py::test_setup_values_ignore_student_changes[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "functions",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_setup_snapshot.py::test_setup_functions_are_returned[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "function_globals",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_setup_snapshot.py::test_setup_function_globals_exclude_student_values[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "unserializable",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_setup_snapshot.py::test_unserializable_setup_value_has_clear_error[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "not_found",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_setup_snapshot.py::test_missing_setup_value[student_code]"
+      }
+    ]
+  }
+}

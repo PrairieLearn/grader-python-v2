@@ -143,8 +143,9 @@ result = sandbox.query_function("student_func", arg1, arg2, timeout=5)
 
 ### 5. Serialization
 
-- Uses `dill` for complex Python objects (numpy arrays, pandas DataFrames, matplotlib plots)
-- Base64-encoded in JSON for transport
+- Student-to-grader values (`query`, `query_function`) are JSON only, through `to_json` / `from_json`
+- Grader-to-student function arguments use base64-encoded `dill`
+- `query_setup` values use base64-encoded `dill`, but they're encoded and sent before student code starts, and the grader never asks the sandbox for them again. The grader must not deserialize `dill` from anything sent after that point
 - See [src/pytest_prairielearn_grader/json_utils.py](src/pytest_prairielearn_grader/json_utils.py) for custom serialization
 
 ## Important Integration Points
@@ -169,7 +170,7 @@ result = sandbox.query_function("student_func", arg1, arg2, timeout=5)
 | "Student code server process terminated"   | Check for unhandled exceptions in setup_code or timeout too short                     |
 | Function not found errors                  | Ensure function is defined in student_code.py, not just setup_code.py                 |
 | Timeout errors on network tests            | Increase timeout via `@pytest.mark.sandbox_timeout(N)`                                |
-| Serialization fails                        | Use `dill`-compatible types (check json_utils.py for supported types)                 |
+| Serialization fails                        | Check json_utils.py for types supported from student code; `query_setup` needs `dill` |
 | Module sandbox with multiple student codes | Use regular `sandbox` fixture instead; module_sandbox requires single student_code.py |
 
 ## Files to Reference When Extending

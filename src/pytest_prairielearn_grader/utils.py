@@ -25,6 +25,7 @@ class QueryStatusCode(StrEnum):
 
     SUCCESS = "success"
     NOT_FOUND = "not_found"
+    NOT_SERIALIZABLE = "not_serializable"
 
 
 class FunctionStatusCode(StrEnum):
@@ -56,14 +57,21 @@ class ProcessStatusCode(StrEnum):
 # TODO use some inheritance on the query and response types
 
 
-class SetupQueryRequest(TypedDict):
-    message_type: Literal["query_setup"]
-    var: str
-
-
 class SetupQueryResponse(TypedDict):
     status: QueryStatusCode
     value_encoded: str
+    error: str | None
+
+
+class SetupSnapshotMessage(TypedDict):
+    # Sent once per sandbox, after setup code and before student code, so its dill
+    # payloads hold nothing from the student. Nothing sent later may be deserialized with dill.
+    message_type: Literal["setup_snapshot"]
+    variables: dict[str, SetupQueryResponse]
+
+
+class SetupSnapshotAck(TypedDict):
+    message_type: Literal["setup_snapshot_ack"]
 
 
 # Variable query dict types

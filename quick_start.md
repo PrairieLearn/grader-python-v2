@@ -264,7 +264,30 @@ result = sandbox.query_function("slow_computation", data, query_timeout=2.0)
 
 **Note**: Student code must define the queried symbols, and return values must be JSON-serializable.
 Supported types include: `int`, `float`, `str`, `list`, `dict`, `bool`, `None`, numpy arrays, pandas DataFrames,
-and matplotlib figures.
+and plots built with `MatplotlibSerializer` (see [Testing Matplotlib Plots](#testing-matplotlib-plots)).
+
+### 5. Query Setup Code Values
+
+```python
+value = sandbox.query_setup("variable_name")
+```
+
+Returns a variable from `setup_code.py`, including ones that aren't passed to the student in `names_for_user`.
+Values can be any object `dill` can serialize, including functions:
+
+```python
+@pytest.mark.grading_data(name="Check Answer", points=2)
+def test_answer(sandbox: StudentFixture) -> None:
+    expected = sandbox.query_setup("compute_expected")(sandbox.query_setup("x"))
+    assert sandbox.query("answer") == expected
+```
+
+- **Values are captured before student code runs.** You get the value as it was when setup code finished, and student code can't change it.
+- **Each call returns a new copy.** Changing it doesn't affect the sandbox or later calls.
+- **Missing variables** raise a `NameError`.
+- **Values `dill` can't serialize**, such as generators, raise a `TypeError` that names the variable. Other setup variables still work.
+
+Because every setup variable is serialized for each sandbox, keep large or slow-to-serialize values out of the top level of `setup_code.py` when you can.
 
 ## Partial Credit and Feedback
 
@@ -950,9 +973,27 @@ since students can learn from reading full tracebacks.
 
 ### Testing Matplotlib Plots
 
-The grader supports automatic serialization and deserialization of matplotlib figures:
+To grade a plot, student code builds it with `MatplotlibSerializer` from the `plot-serializer` package and returns the serializer. The test receives a matplotlib `Figure`.
+
+`plot-serializer` is included in the `:latest` image but not in `:lite`. Returning a plain matplotlib `Figure` from student code isn't supported.
 
 ```python
+# Student code
+from plot_serializer.matplotlib.serializer import MatplotlibSerializer
+
+
+def create_plot(data):
+    serializer = MatplotlibSerializer()
+    fig, ax = serializer.subplots()
+    ax.plot(data)
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Value")
+    ax.set_title("Data Visualization")
+    return serializer
+```
+
+```python
+# Test code
 import matplotlib
 matplotlib.use("Agg")  # Non-GUI backend for server environments
 
@@ -965,7 +1006,7 @@ from pytest_prairielearn_grader.fixture import StudentFixture
 @pytest.mark.grading_data(name="Plot Test", points=5)
 def test_student_plot(sandbox: StudentFixture) -> None:
     """Test that student creates a correct plot."""
-    # Student function returns a matplotlib figure
+    # Student function returns a MatplotlibSerializer, which arrives here as a Figure
     plot = sandbox.query_function("create_plot", data)
 
     assert isinstance(plot, Figure)
@@ -984,7 +1025,7 @@ def test_student_plot(sandbox: StudentFixture) -> None:
 
 The grader automatically serializes/deserializes:
 
-- Matplotlib figures
+- Plots built with `MatplotlibSerializer` (received as a `Figure`)
 - NumPy arrays
 - Pandas DataFrames
 - Standard Python types (int, float, str, list, dict, bool, None)
@@ -1019,7 +1060,7 @@ Two image variants are published. Pick the smallest one that includes what your 
 
 | Tag       | Size (approx.) | Includes                                                                                                                                                                                 | Best for                                                                                        |
 | --------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `:latest` | ~400–500 MB    | Full scientific stack: `numpy`, `pandas`, `scipy`, `matplotlib` + `matplotcheck2`, `seaborn`, `scikit-learn`, `sympy`, `networkx`, `nltk`, `nbformat`, and more | Any course that needs scientific computing, data science, plotting, or Jupyter notebook grading |
+| `:latest` | ~400–500 MB    | Full scientific stack: `numpy`, `pandas`, `scipy`, `matplotlib` + `matplotcheck2` + `plot-serializer`, `seaborn`, `scikit-learn`, `sympy`, `networkx`, `nltk`, `nbformat`, and more | Any course that needs scientific computing, data science, plotting, or Jupyter notebook grading |
 | `:lite`   | ~60–80 MB      | Grader core only: `pytest-prairielearn-grader`, `Pygments`, `beautifulsoup4`, `defusedxml`, `requests`                                                                                   | Introductory CS courses where student code uses only the Python standard library                |
 
 To use the lite image, change the `image` field:
