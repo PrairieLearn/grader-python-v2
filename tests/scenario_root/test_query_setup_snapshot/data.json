@@ -1,0 +1,12 @@
+{
+  "params": {
+    "import_blacklist": [],
+    "names_for_user": [
+      {
+        "name": "shared",
+        "type": "list",
+        "description": ""
+      }
+    ]
+  }
+}

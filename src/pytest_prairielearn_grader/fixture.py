@@ -19,6 +19,9 @@ from .utils import QueryStatusCode
 from .utils import ServerStatusCode
 from .utils import SetupQueryRequest
 from .utils import SetupQueryResponse
+from .utils import SetupSnapshotAck
+from .utils import SetupSnapshotEntry
+from .utils import SetupSnapshotMessage
 from .utils import StudentFunctionRequest
 from .utils import StudentFunctionResponse
 from .utils import StudentQueryRequest
@@ -81,6 +84,17 @@ class StudentFiles(NamedTuple):
     trailing_file: Path
     student_code_file: Path
     setup_code_file: Path
+
+
+def _no_response(error: Exception) -> ProcessStartResponse:
+    return {
+        "status": ProcessStatusCode.NO_RESPONSE,
+        "execution_error": type(error).__name__,
+        "execution_message": str(error),
+        "execution_traceback": "",
+        "stdout": "",
+        "stderr": "",
+    }
 
 
 class FeedbackFixture:
@@ -238,14 +252,7 @@ class _SandboxBase:
             if res.get("stdout"):
                 self._accumulated_stdout.append(res["stdout"])
         except Exception as e:
-            res = {
-                "status": ProcessStatusCode.NO_RESPONSE,
-                "execution_error": type(e).__name__,
-                "execution_message": str(e),
-                "execution_traceback": "",
-                "stdout": "",
-                "stderr": "",
-            }
+            res = _no_response(e)
         return res
 
     def query_raw(self, var_to_query: str, *, query_timeout: float = DEFAULT_TIMEOUT) -> StudentQueryResponse:
@@ -344,6 +351,7 @@ class StudentFixture(_SandboxBase):
     trailing_file: Path
     student_code_file: Path
     setup_code_file: Path
+    _setup_snapshot: dict[str, SetupSnapshotEntry] | None
 
     def __init__(
         self,
@@ -362,6 +370,7 @@ class StudentFixture(_SandboxBase):
         self.student_code_file = file_names.student_code_file
         self.setup_code_file = file_names.setup_code_file
         self.notebook_cell_tag = notebook_cell_tag
+        self._setup_snapshot = None
 
     def start_student_code_server(self, *, initialization_timeout: float = DEFAULT_TIMEOUT) -> ProcessStartResponse:
         if self.worker_username is not None:
@@ -404,22 +413,55 @@ class StudentFixture(_SandboxBase):
             names_for_user_list=self.names_for_user_list,
         )
         self._send_json_object(json_message)
+        try:
+            self._receive_setup_snapshot()
+        except Exception as e:
+            return _no_response(e)
         return self._read_start_response()
 
-    def query_setup_raw(self, var_to_query: str) -> SetupQueryResponse:
+    def _receive_setup_snapshot(self) -> None:
+        """Store the setup variables and release the subprocess to start running student code."""
+        snapshot: SetupSnapshotMessage = json.loads(self._read_from_socket().decode())
+        if snapshot.get("message_type") != "setup_snapshot":
+            raise RuntimeError(f"Expected the setup snapshot from the sandbox, but got: {snapshot}")
+        self._setup_snapshot = snapshot["variables"]
+        ack: SetupSnapshotAck = {"message_type": "setup_snapshot_ack"}
+        self._send_json_object(ack)
+
+    def query_setup_raw(self, var_to_query: str, *, query_timeout: float = DEFAULT_TIMEOUT) -> SetupQueryResponse:
+        """Ask the sandbox for a setup variable as JSON. Never deserialize dill from this response."""
+        self._assert_no_server_failure()
         self._assert_process_running()
         json_message: SetupQueryRequest = {"message_type": MessageType.QUERY_SETUP, "var": var_to_query}
         assert self.student_socket is not None, "Student socket is not connected. Please start the student code server first."
+        self.student_socket.settimeout(query_timeout)
         self._send_json_object(json_message)
-        data: SetupQueryResponse = json.loads(self._read_from_socket().decode())
+        data: SetupQueryResponse = self._read_query_response()
         return data
 
-    def query_setup(self, var_to_query: str) -> Any:
-        """Queries a variable from the setup code and returns its value."""
-        response = self.query_setup_raw(var_to_query)
-        if response["status"] == "not_found":
-            raise NameError(f"Query for setup variable '{var_to_query}' failed")
-        return deserialize_object_unsafe(response["value_encoded"])
+    def query_setup(self, var_to_query: str, *, query_timeout: float = DEFAULT_TIMEOUT) -> Any:
+        """
+        Return a value from the setup code.
+
+        Values JSON can't represent, such as functions, were dill-encoded before student code
+        started, so they hold nothing from the student and are read from that stored copy.
+        Other values stay in the sandbox and are sent as JSON when queried. Student code could
+        change these, but they can't run code in the grader.
+        """
+        assert self._setup_snapshot is not None, "Setup variables are not available. Please start the student code server first."
+        snapshot_entry = self._setup_snapshot.get(var_to_query)
+        if snapshot_entry is not None:
+            if snapshot_entry["status"] == QueryStatusCode.NOT_SERIALIZABLE:
+                raise TypeError(f"Setup variable '{var_to_query}' could not be serialized with dill: {snapshot_entry['error']}")
+            return deserialize_object_unsafe(snapshot_entry["value_encoded"])
+
+        response = self.query_setup_raw(var_to_query, query_timeout=query_timeout)
+        match response["status"]:
+            case QueryStatusCode.NOT_FOUND:
+                raise NameError(f"Query for setup variable '{var_to_query}' failed")
+            case QueryStatusCode.NOT_SERIALIZABLE:
+                raise TypeError(f"Setup variable '{var_to_query}' could not be serialized as JSON: {response['error']}")
+        return from_json(response["value"])
 
     # TODO add functions that let instructors use the student fixture
     # use the stuff pete set up here: https://github.com/reteps/pytest-autograder-prototype

@@ -10,6 +10,7 @@ import pathlib
 import sys
 import traceback
 import types
+from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Mapping
 from collections.abc import Sequence
@@ -19,6 +20,7 @@ from copy import deepcopy
 from typing import Any
 
 from pytest_prairielearn_grader.json_utils import from_server_json
+from pytest_prairielearn_grader.json_utils import is_json_transportable
 
 # TODO make it so that other files in this package cannot import from this one
 # ask Gemini how to do it
@@ -33,6 +35,8 @@ from pytest_prairielearn_grader.utils import ServerFailureResponse
 from pytest_prairielearn_grader.utils import ServerStatusCode
 from pytest_prairielearn_grader.utils import SetupQueryRequest
 from pytest_prairielearn_grader.utils import SetupQueryResponse
+from pytest_prairielearn_grader.utils import SetupSnapshotEntry
+from pytest_prairielearn_grader.utils import SetupSnapshotMessage
 from pytest_prairielearn_grader.utils import StudentFunctionRequest
 from pytest_prairielearn_grader.utils import StudentFunctionResponse
 from pytest_prairielearn_grader.utils import StudentQueryRequest
@@ -161,6 +165,30 @@ async def student_function_runner(
         return json.dumps(not_serializable_response)
 
 
+def encode_setup_variables(local_vars: dict[str, Any]) -> dict[str, SetupSnapshotEntry]:
+    """
+    Dill-encode the setup variables that JSON can't represent, such as functions.
+
+    Other variables aren't encoded here, so large data doesn't slow down starting the sandbox.
+    They're sent as JSON if they're queried. Each variable is encoded on its own so that one
+    value dill can't handle only fails a query for that value, not the whole sandbox.
+    """
+    encoded: dict[str, SetupSnapshotEntry] = {}
+    for name, value in local_vars.items():
+        if is_json_transportable(value):
+            continue
+        try:
+            # recurse leaves out globals a function doesn't use, which can include large data.
+            encoded[name] = {
+                "status": QueryStatusCode.SUCCESS,
+                "value_encoded": serialize_object_unsafe(value, recurse=True),
+                "error": None,
+            }
+        except Exception as e:
+            encoded[name] = {"status": QueryStatusCode.NOT_SERIALIZABLE, "value_encoded": "", "error": f"{type(e).__name__}: {e}"}
+    return encoded
+
+
 def get_custom_importer(
     import_whitelist: list[str] | None,
     import_blacklist: list[str] | None,
@@ -232,6 +260,7 @@ async def student_code_runner(
     starting_vars: dict[str, Any] | None,
     builtin_whitelist: list[str] | None,
     names_for_user_list: list[str] | None,
+    on_setup_complete: Callable[[dict[str, Any]], Awaitable[None]],
 ) -> tuple[dict[str, Any], dict[str, Any], ProcessStartResponse]:
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
@@ -277,6 +306,10 @@ async def student_code_runner(
             elif starting_vars is not None and var_name in starting_vars:
                 # If not in local_vars (setup_code), try getting from starting_vars
                 student_code_vars[var_name] = deepcopy(starting_vars[var_name])
+
+    # This has to finish before any student code runs: it's what guarantees the dill data
+    # the grader deserializes contains nothing the student defined or changed.
+    await on_setup_complete(local_vars if execution_error is None else {})
 
     if execution_error is None:
         try:
@@ -329,7 +362,7 @@ async def workspace_runner(
     starting_vars: dict[str, Any] | None,
     builtin_whitelist: list[str] | None,
     names_for_user_list: list[str] | None,
-) -> tuple[dict[str, Any], dict[str, Any], ProcessStartResponse]:
+) -> tuple[dict[str, Any], ProcessStartResponse]:
     """
     Sets up a workspace sandbox by inserting workspace_dir at the front of sys.path
     so that student modules can be imported via their dotted names.  Optionally
@@ -414,7 +447,7 @@ async def workspace_runner(
         "execution_traceback": str(exception_traceback),
     }
 
-    return local_vars, student_code_vars, result_dict
+    return student_code_vars, result_dict
 
 
 def encode_server_failure(message: str) -> bytes:
@@ -464,7 +497,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 ws_json_message: WorkspaceStartRequest = json_message
                 workspace_mode = True
 
-                local_vars, student_code_vars, start_response = await workspace_runner(
+                student_code_vars, start_response = await workspace_runner(
                     workspace_dir=ws_json_message["workspace_dir"],
                     exec_entry=ws_json_message["exec_entry"],
                     setup_code=ws_json_message["setup_code"],
@@ -494,6 +527,15 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
                 populate_linecache(student_code, student_file_name)
 
+                async def send_setup_snapshot(setup_vars: dict[str, Any]) -> None:
+                    snapshot: SetupSnapshotMessage = {"message_type": "setup_snapshot", "variables": encode_setup_variables(setup_vars)}
+                    writer.write((json.dumps(snapshot) + os.linesep).encode())
+                    await writer.drain()
+                    # drain() can return with data still buffered in this process, where student code
+                    # could reach it. Only the grader's ack proves it has the whole snapshot.
+                    if not await reader.readline():
+                        raise ConnectionError("Grader disconnected before acknowledging the setup snapshot.")
+
                 local_vars, student_code_vars, start_response = await student_code_runner(
                     setup_code=setup_code,
                     student_code=student_code,
@@ -504,6 +546,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     starting_vars=starting_vars,
                     builtin_whitelist=builtin_whitelist,
                     names_for_user_list=names_for_user_list,
+                    on_setup_complete=send_setup_snapshot,
                 )
 
                 writer.write((json.dumps(start_response) + os.linesep).encode())
@@ -513,15 +556,24 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 query_setup_json_message: SetupQueryRequest = json_message
 
                 var_to_query = query_setup_json_message["var"]
-                if var_to_query in local_vars:
-                    setup_query_response: SetupQueryResponse = {
-                        "status": QueryStatusCode.SUCCESS,
-                        "value_encoded": serialize_object_unsafe(local_vars[var_to_query]),
-                    }
+                setup_query_response: SetupQueryResponse
+                if var_to_query not in local_vars:
+                    setup_query_response = {"status": QueryStatusCode.NOT_FOUND, "value": None, "error": None}
+                    encoded_response = json.dumps(setup_query_response)
                 else:
-                    setup_query_response = {"status": QueryStatusCode.NOT_FOUND, "value_encoded": ""}
+                    setup_query_response = {"status": QueryStatusCode.SUCCESS, "value": None, "error": None}
+                    try:
+                        setup_query_response["value"] = to_json(local_vars[var_to_query])
+                        encoded_response = json.dumps(setup_query_response)
+                    except Exception as e:
+                        setup_query_response = {
+                            "status": QueryStatusCode.NOT_SERIALIZABLE,
+                            "value": None,
+                            "error": f"{type(e).__name__}: {e}",
+                        }
+                        encoded_response = json.dumps(setup_query_response)
 
-                writer.write((json.dumps(setup_query_response) + os.linesep).encode())
+                writer.write((encoded_response + os.linesep).encode())
 
             elif msg_type == MessageType.QUERY:
                 assert student_code_vars is not None

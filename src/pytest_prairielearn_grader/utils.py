@@ -93,8 +93,28 @@ class SetupQueryRequest(TypedDict):
 
 
 class SetupQueryResponse(TypedDict):
+    # Student code may have run by the time this is sent, so it's JSON only.
+    status: QueryStatusCode
+    value: Any
+    error: str | None
+
+
+class SetupSnapshotEntry(TypedDict):
     status: QueryStatusCode
     value_encoded: str
+    error: str | None
+
+
+class SetupSnapshotMessage(TypedDict):
+    # Sent once per sandbox, after setup code and before student code, so its dill
+    # payloads hold nothing from the student. Nothing sent later may be deserialized with dill.
+    # Holds only the setup variables that JSON can't represent.
+    message_type: Literal["setup_snapshot"]
+    variables: dict[str, SetupSnapshotEntry]
+
+
+class SetupSnapshotAck(TypedDict):
+    message_type: Literal["setup_snapshot_ack"]
 
 
 # Variable query dict types
@@ -169,16 +189,20 @@ class ProcessStartResponse(TypedDict):
     execution_traceback: str
 
 
-def serialize_object_unsafe(obj: object) -> str:
+def serialize_object_unsafe(obj: object, *, recurse: bool = False) -> str:
     """
     Serializes an arbitrary Python object to a JSON string.
     The object is first serialized using dill, then base64 encoded.
+
+    Args:
+        obj: The object to serialize.
+        recurse: Include only the globals a function refers to, rather than all of them.
 
     Returns:
         A JSON string representing the serialized object.
     """
     # 1. Serialize the object using dill
-    dilled_bytes = dill.dumps(obj)
+    dilled_bytes = dill.dumps(obj, recurse=recurse)
 
     # 2. Base64 encode the byte stream
     base64_encoded_bytes = base64.b64encode(dilled_bytes)
