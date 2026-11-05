@@ -69,17 +69,17 @@ def get_datadir(test_module: ModuleType) -> Path | None:
 
 @pytest.fixture(scope="module")
 def data_json(request: pytest.FixtureRequest) -> dict[str, Any] | None:
+    datadir = get_datadir(request.module)
+    assert datadir is not None
+    data_file = datadir / "data.json"
+    logger.debug(f"Loading data.json from {data_file}")
     try:
-        datadir = get_datadir(request.module)
-        assert datadir is not None
-        data_file = datadir / "data.json"
-        logger.debug(f"Loading data.json from {data_file}")
         return json.loads(data_file.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.debug(f"No data.json found or failed to load: {e}")
-
-    # If the data file is not found or cannot be read, return None
-    return None
+    except FileNotFoundError:
+        logger.debug(f"No data.json found at {data_file}")
+        return None
+    except (OSError, ValueError) as e:
+        raise RuntimeError(f"Could not load {data_file.name}: {e}") from e
 
     # if datadir is None or not datadir.is_dir():
     #     raise ValueError(f"Data directory '{datadir}' not found or is not a directory.")
