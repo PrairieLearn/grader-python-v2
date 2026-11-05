@@ -603,6 +603,8 @@ def generate(data):
 
 These parameters are automatically passed to the autograder via `/grade/data/data.json` and enforced during student code execution.
 
+In the grader images, `run.sh` passes this path to pytest with `--data-json-path` and makes the file readable only by root, so student code can't open it. The file can contain `correct_answers`. Without that option, for example when running locally, the fixture reads `data.json` next to your test file. The sandbox still receives `params` through `__data_params`, so don't rely on values in `params` staying hidden from student code.
+
 #### Testing Import/Builtin Restrictions Locally
 
 To test your restrictions in the test scenarios:

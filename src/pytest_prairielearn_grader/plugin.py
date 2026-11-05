@@ -67,19 +67,28 @@ def get_datadir(test_module: ModuleType) -> Path | None:
     return data_dir
 
 
+def _find_data_json(request: pytest.FixtureRequest) -> Path:
+    """Prefer the file named by --data-json-path, and otherwise use data.json next to the test file."""
+    data_json_path = request.config.getoption("--data-json-path")
+    if data_json_path is not None and Path(data_json_path).is_file():
+        return Path(data_json_path)
+
+    datadir = get_datadir(request.module)
+    assert datadir is not None
+    return datadir / "data.json"
+
+
 @pytest.fixture(scope="module")
 def data_json(request: pytest.FixtureRequest) -> dict[str, Any] | None:
+    data_file = _find_data_json(request)
+    logger.debug(f"Loading data.json from {data_file}")
     try:
-        datadir = get_datadir(request.module)
-        assert datadir is not None
-        data_file = datadir / "data.json"
-        logger.debug(f"Loading data.json from {data_file}")
         return json.loads(data_file.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.debug(f"No data.json found or failed to load: {e}")
-
-    # If the data file is not found or cannot be read, return None
-    return None
+    except FileNotFoundError:
+        logger.debug(f"No data.json found at {data_file}")
+        return None
+    except (OSError, ValueError) as e:
+        raise RuntimeError(f"Could not load {data_file.name}: {e}") from e
 
     # if datadir is None or not datadir.is_dir():
     #     raise ValueError(f"Data directory '{datadir}' not found or is not a directory.")
@@ -677,6 +686,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     """
     group = parser.getgroup("pytest_pl_autograder", "Prairielearn Python Autograder Options")
 
+    group.addoption(
+        "--data-json-path",
+        action="store",
+        default=None,
+        help="Path to the data.json file for this grading job. If it doesn't exist, data.json next to the test file is used.",
+    )
     group.addoption(
         "--worker-username",
         action="store",

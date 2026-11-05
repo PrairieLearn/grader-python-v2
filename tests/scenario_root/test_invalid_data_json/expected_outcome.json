@@ -1,0 +1,15 @@
+{
+  "expected_data_object": {
+    "score": 0.0,
+    "tests": [
+      {
+        "max_points": 1,
+        "points_frac": 0.0,
+        "points": 0.0,
+        "test_id": "test_invalid_data_json.py::test_query[student_code]",
+        "outcome": "error",
+        "message": "Could not load data.json: Expecting value"
+      }
+    ]
+  }
+}

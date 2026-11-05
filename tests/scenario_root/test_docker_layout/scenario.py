@@ -10,7 +10,6 @@ Resulting directory structure (mirrors what run.sh produces):
         student/
             student_code.py        <- moved from /grade/student/ by run.sh
         setup_code.py              <- from /grade/tests/ (not present here)
-        data.json                  <- from /grade/tests/ (not present here)
 
 The plugin's _find_student_files fallback discovers student_code.py inside the
 student/ subdirectory automatically when no files match the pattern at the root.
