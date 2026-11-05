@@ -58,11 +58,37 @@ class ProcessStatusCode(StrEnum):
     NO_RESPONSE = "no_response"
 
 
+class ServerStatusCode(StrEnum):
+    """
+    Status codes for an error in the sandbox server itself, not in a specific request.
+    The server closes the connection after sending one of these.
+    """
+
+    FAILURE = "failure"
+
+
+class MessageType(StrEnum):
+    """
+    Types of the messages the grader sends to the sandbox server.
+    """
+
+    START = "start"
+    START_WORKSPACE = "start_workspace"
+    QUERY = "query"
+    QUERY_SETUP = "query_setup"
+    QUERY_FUNCTION = "query_function"
+
+
+class ServerFailureResponse(TypedDict):
+    status: Literal[ServerStatusCode.FAILURE]
+    message: str
+
+
 # TODO use some inheritance on the query and response types
 
 
 class SetupQueryRequest(TypedDict):
-    message_type: Literal["query_setup"]
+    message_type: Literal[MessageType.QUERY_SETUP]
     var: str
 
 
@@ -73,7 +99,7 @@ class SetupQueryResponse(TypedDict):
 
 # Variable query dict types
 class StudentQueryRequest(TypedDict):
-    message_type: Literal["query"]
+    message_type: Literal[MessageType.QUERY]
     var: str
     query_timeout: float
 
@@ -87,7 +113,7 @@ class StudentQueryResponse(TypedDict):
 
 # Function query dict types
 class StudentFunctionRequest(TypedDict):
-    message_type: Literal["query_function"]
+    message_type: Literal[MessageType.QUERY_FUNCTION]
     function_name: str
     args_encoded: str  # TODO add a stronger type for the input/output of the serialized function
     kwargs_encoded: str
@@ -109,7 +135,7 @@ class StudentFunctionResponse(TypedDict):
 
 
 class ProcessStartRequest(TypedDict):
-    message_type: Literal["start"]
+    message_type: Literal[MessageType.START]
     student_code: str
     student_file_name: str
     setup_code: str | None
@@ -122,7 +148,7 @@ class ProcessStartRequest(TypedDict):
 
 
 class WorkspaceStartRequest(TypedDict):
-    message_type: Literal["start_workspace"]
+    message_type: Literal[MessageType.START_WORKSPACE]
     workspace_dir: str
     exec_entry: str | None
     setup_code: str | None
