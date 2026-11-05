@@ -152,7 +152,8 @@ the originals through the `tests_dir` fixture. A missing listed file makes the s
 
 ### 5. Serialization
 
-- Uses `dill` for complex Python objects (numpy arrays, pandas DataFrames, matplotlib plots)
+- Student values reach the grader as JSON through `to_json` and `from_json`, including numpy arrays, pandas DataFrames and matplotlib plots (see [src/pytest_prairielearn_grader/matplotlib_json.py](src/pytest_prairielearn_grader/matplotlib_json.py))
+- Uses `dill` for grader-to-student function arguments and `query_setup` values
 - Base64-encoded in JSON for transport
 - See [src/pytest_prairielearn_grader/json_utils.py](src/pytest_prairielearn_grader/json_utils.py) for custom serialization
 

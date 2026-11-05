@@ -50,6 +50,12 @@ def to_json(v: Any) -> Any:
             pure_json_df = json.loads(encoded_json_str_df)
 
             return {"_type": "dataframe_v2", "_value": pure_json_df}
+    elif module == "matplotlib":
+        from pytest_prairielearn_grader.matplotlib_json import is_plot
+        from pytest_prairielearn_grader.matplotlib_json import plot_to_json
+
+        if is_plot(v):
+            return plot_to_json(v)
     elif module == "plot_serializer":
         from plot_serializer.matplotlib.serializer import MatplotlibSerializer
 
@@ -114,6 +120,13 @@ def from_json(v_json) -> Any:
             # pandas read_json() can process it.
             value_str = StringIO(json.dumps(v_json["_value"]))
             return pd.read_json(value_str, orient="table")
+        elif v_json["_type"] == "matplotlib_figure":
+            from pytest_prairielearn_grader.matplotlib_json import plot_from_json
+
+            if "_value" in v_json:
+                return plot_from_json(v_json["_value"])
+            else:
+                raise ValueError("variable of type matplotlib_figure should have value")
         elif v_json["_type"] == "matplotlib_serializer":
             from plot_serializer.matplotlib.deserializer import deserialize_from_json
 
