@@ -264,7 +264,7 @@ result = sandbox.query_function("slow_computation", data, query_timeout=2.0)
 
 **Note**: Student code must define the queried symbols, and return values must be JSON-serializable.
 Supported types include: `int`, `float`, `str`, `list`, `dict`, `bool`, `None`, numpy arrays, pandas DataFrames,
-and matplotlib figures.
+and plots built with `MatplotlibSerializer` (see [Testing Matplotlib Plots](#testing-matplotlib-plots)).
 
 ## Partial Credit and Feedback
 
@@ -602,6 +602,8 @@ def generate(data):
 ```
 
 These parameters are automatically passed to the autograder via `/grade/data/data.json` and enforced during student code execution.
+
+In the grader images, `run.sh` passes this path to pytest with `--data-json-path` and makes the file readable only by root, so student code can't open it. The file can contain `correct_answers`. Without that option, for example when running locally, the fixture reads `data.json` next to your test file. The sandbox still receives `params` through `__data_params`, so don't rely on values in `params` staying hidden from student code.
 
 #### Testing Import/Builtin Restrictions Locally
 
@@ -950,9 +952,27 @@ since students can learn from reading full tracebacks.
 
 ### Testing Matplotlib Plots
 
-The grader supports automatic serialization and deserialization of matplotlib figures:
+To grade a plot, student code builds it with `MatplotlibSerializer` from the `plot-serializer` package and returns the serializer. The test receives a matplotlib `Figure`.
+
+`plot-serializer` is included in the `:latest` image but not in `:lite`. Returning a plain matplotlib `Figure` from student code isn't supported.
 
 ```python
+# Student code
+from plot_serializer.matplotlib.serializer import MatplotlibSerializer
+
+
+def create_plot(data):
+    serializer = MatplotlibSerializer()
+    fig, ax = serializer.subplots()
+    ax.plot(data)
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Value")
+    ax.set_title("Data Visualization")
+    return serializer
+```
+
+```python
+# Test code
 import matplotlib
 matplotlib.use("Agg")  # Non-GUI backend for server environments
 
@@ -965,7 +985,7 @@ from pytest_prairielearn_grader.fixture import StudentFixture
 @pytest.mark.grading_data(name="Plot Test", points=5)
 def test_student_plot(sandbox: StudentFixture) -> None:
     """Test that student creates a correct plot."""
-    # Student function returns a matplotlib figure
+    # Student function returns a MatplotlibSerializer, which arrives here as a Figure
     plot = sandbox.query_function("create_plot", data)
 
     assert isinstance(plot, Figure)
@@ -984,7 +1004,7 @@ def test_student_plot(sandbox: StudentFixture) -> None:
 
 The grader automatically serializes/deserializes:
 
-- Matplotlib figures
+- Plots built with `MatplotlibSerializer` (received as a `Figure`)
 - NumPy arrays
 - Pandas DataFrames
 - Standard Python types (int, float, str, list, dict, bool, None)
@@ -1019,7 +1039,7 @@ Two image variants are published. Pick the smallest one that includes what your 
 
 | Tag       | Size (approx.) | Includes                                                                                                                                                                                 | Best for                                                                                        |
 | --------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `:latest` | ~400–500 MB    | Full scientific stack: `numpy`, `pandas`, `scipy`, `matplotlib` + `matplotcheck2`, `seaborn`, `scikit-learn`, `sympy`, `networkx`, `nltk`, `nbformat`, and more | Any course that needs scientific computing, data science, plotting, or Jupyter notebook grading |
+| `:latest` | ~400–500 MB    | Full scientific stack: `numpy`, `pandas`, `scipy`, `matplotlib` + `matplotcheck2` + `plot-serializer`, `seaborn`, `scikit-learn`, `sympy`, `networkx`, `nltk`, `nbformat`, and more | Any course that needs scientific computing, data science, plotting, or Jupyter notebook grading |
 | `:lite`   | ~60–80 MB      | Grader core only: `pytest-prairielearn-grader`, `Pygments`, `beautifulsoup4`, `defusedxml`, `requests`                                                                                   | Introductory CS courses where student code uses only the Python standard library                |
 
 To use the lite image, change the `image` field:

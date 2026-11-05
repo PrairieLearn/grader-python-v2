@@ -10,14 +10,15 @@ if [ ! -d /grade ]; then
 fi
 
 # the parent directory containing everything about this grading job
-export JOB_DIR='/grade'
+JOB_DIR='/grade'
 # the job subdirectories
 STUDENT_DIR=$JOB_DIR'/student'
 TEST_DIR=$JOB_DIR'/tests'
 OUT_DIR=$JOB_DIR'/results'
+DATA_DIR=$JOB_DIR'/data'
 
 # where we will copy everything
-export MERGE_DIR=$JOB_DIR'/run'
+MERGE_DIR=$JOB_DIR'/run'
 
 # now set up the stuff so that our run.sh can work
 mkdir $MERGE_DIR
@@ -33,6 +34,21 @@ mv "$STUDENT_DIR" "$MERGE_DIR/test_student/student"
 mv $TEST_DIR/* $MERGE_DIR/test_student/
 mv $MERGE_DIR/test_student/test_student.py $MERGE_DIR/test_student.py
 
+# PrairieLearn writes data.json to the data directory, and pytest is told to read it from there.
+# It can hold correct_answers, so it's for the grader only. It must be owned by root with
+# owner-only modes: student code keeps root's supplementary groups, and its uid may match the owner
+# of files mounted from the host.
+protect_data_json() {
+    chown -R root:root "$DATA_DIR" || return 1
+    chmod 700 "$DATA_DIR" && chmod 600 "$DATA_DIR/data.json"
+}
+
+if [ -f "$DATA_DIR/data.json" ] && ! protect_data_json; then
+    echo '{"succeeded": false, "score": 0.0, "message": "The autograder could not protect its grading data. Please contact course staff and have them check the logs for this submission."}' > "$OUT_DIR/results.json"
+    echo "ERROR: could not protect $DATA_DIR/data.json"
+    exit 1
+fi
+
 # Do not allow ag user to modify, rename, or delete any existing files
 #chmod -R 755 "$MERGE_DIR"
 #chmod 1777 "$MERGE_DIR"
@@ -45,7 +61,9 @@ echo "[run] starting autograder"
 
 # run the autograder as a limited user called ag
 # Use --worker-username to drop privileges to the 'ag' user in the student code sandbox
-uv run pytest -p prairielearn-grader --color=no --log-cli-level=DEBUG --worker-username ag "$MERGE_DIR"
+# Pass plugin options with '=': pytest's first pass over the arguments, before plugin options are
+# registered, would treat a separate value as a test path.
+uv run pytest -p prairielearn-grader --color=no --log-cli-level=DEBUG --worker-username=ag --data-json-path="$DATA_DIR/data.json" "$MERGE_DIR"
 
 # TODO change the default output name
 mv "$MERGE_DIR/autograder_results.json" "$OUT_DIR/results.json"
