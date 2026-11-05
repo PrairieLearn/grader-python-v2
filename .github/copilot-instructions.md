@@ -115,7 +115,7 @@ def test_multi_step(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
 result = sandbox.query_function("student_func", arg1, arg2, timeout=5)
 
 # Query returns StudentFunctionResponse with:
-# - status: SUCCESS, EXCEPTION, TIMEOUT, NOT_FOUND
+# - status: SUCCESS, EXCEPTION, TIMEOUT, NOT_FOUND, NOT_SERIALIZABLE
 # - value: JSON-deserialized return value
 # - stdout/stderr: captured output
 # - exception_name/message/traceback: if exception occurred
