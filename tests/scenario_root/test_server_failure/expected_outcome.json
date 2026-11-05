@@ -1,0 +1,32 @@
+{
+  "expected_data_object": {
+    "score": 0.6666666666666666,
+    "tests": [
+      {
+        "max_points": 1,
+        "name": "clear_error",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_server_failure.py::test_failure_raises_clear_error[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "later_queries",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_server_failure.py::test_later_queries_raise_same_error[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "uncaught",
+        "points": 0.0,
+        "points_frac": 0.0,
+        "outcome": "failed",
+        "test_id": "test_server_failure.py::test_uncaught_failure_shows_message[student_code]",
+        "message": "The sandbox stopped unexpectedly, so later queries won't work: An error occurred: "
+      }
+    ]
+  }
+}

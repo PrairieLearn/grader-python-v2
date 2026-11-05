@@ -24,10 +24,13 @@ from pytest_prairielearn_grader.json_utils import from_server_json
 # ask Gemini how to do it
 from pytest_prairielearn_grader.json_utils import to_json
 from pytest_prairielearn_grader.utils import FunctionStatusCode
+from pytest_prairielearn_grader.utils import MessageType
 from pytest_prairielearn_grader.utils import ProcessStartRequest
 from pytest_prairielearn_grader.utils import ProcessStartResponse
 from pytest_prairielearn_grader.utils import ProcessStatusCode
 from pytest_prairielearn_grader.utils import QueryStatusCode
+from pytest_prairielearn_grader.utils import ServerFailureResponse
+from pytest_prairielearn_grader.utils import ServerStatusCode
 from pytest_prairielearn_grader.utils import SetupQueryRequest
 from pytest_prairielearn_grader.utils import SetupQueryResponse
 from pytest_prairielearn_grader.utils import StudentFunctionRequest
@@ -414,6 +417,11 @@ async def workspace_runner(
     return local_vars, student_code_vars, result_dict
 
 
+def encode_server_failure(message: str) -> bytes:
+    response: ServerFailureResponse = {"status": ServerStatusCode.FAILURE, "message": message}
+    return (json.dumps(response) + os.linesep).encode()
+
+
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     """
     Reads lines from stdin asynchronously and responds on stdout.
@@ -452,7 +460,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             json_message = json.loads(line)
 
             msg_type = json_message.get("message_type")
-            if msg_type == "start_workspace":
+            if msg_type == MessageType.START_WORKSPACE:
                 ws_json_message: WorkspaceStartRequest = json_message
                 workspace_mode = True
 
@@ -470,7 +478,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
                 writer.write((json.dumps(start_response) + os.linesep).encode())
 
-            elif msg_type == "start":
+            elif msg_type == MessageType.START:
                 start_json_message: ProcessStartRequest = json_message
                 # Execute the student code for the first time and load
                 # variables into the student_code_vars dictionary
@@ -500,7 +508,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
                 writer.write((json.dumps(start_response) + os.linesep).encode())
 
-            elif msg_type == "query_setup":
+            elif msg_type == MessageType.QUERY_SETUP:
                 assert local_vars is not None
                 query_setup_json_message: SetupQueryRequest = json_message
 
@@ -515,7 +523,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
                 writer.write((json.dumps(setup_query_response) + os.linesep).encode())
 
-            elif msg_type == "query":
+            elif msg_type == MessageType.QUERY:
                 assert student_code_vars is not None
                 query_json_message: StudentQueryRequest = json_message
 
@@ -538,7 +546,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
                 writer.write((json.dumps(query_response) + os.linesep).encode())
 
-            elif msg_type == "query_function":
+            elif msg_type == MessageType.QUERY_FUNCTION:
                 assert student_code_vars is not None
                 query_function_json_message: StudentFunctionRequest = json_message
 
@@ -566,11 +574,11 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             await writer.drain()  # Ensure the response is written to stdout
 
     except asyncio.CancelledError:
-        writer.write((json.dumps({"status": "failure", "message": "Server was cancelled."}) + os.linesep).encode())
+        writer.write(encode_server_failure("Server was cancelled."))
     except asyncio.TimeoutError:
-        writer.write((json.dumps({"status": "failure", "message": "Student code timed out."}) + os.linesep).encode())
+        writer.write(encode_server_failure("Student code timed out."))
     except Exception as e:
-        writer.write((json.dumps({"status": "failure", "message": f"An error occurred: {e}"}) + os.linesep).encode())
+        writer.write(encode_server_failure(f"An error occurred: {e}"))
     finally:
         # It's good practice to close transports and writers
         # print("Closing server connections...")
