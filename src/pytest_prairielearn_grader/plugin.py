@@ -67,28 +67,30 @@ def get_datadir(test_module: ModuleType) -> Path | None:
     return data_dir
 
 
-def _find_data_json(request: pytest.FixtureRequest) -> Path:
+def _find_data_json(request: pytest.FixtureRequest) -> Path | None:
     """Prefer the file named by --data-json-path, and otherwise use data.json next to the test file."""
     data_json_path = request.config.getoption("--data-json-path")
     if data_json_path is not None and Path(data_json_path).is_file():
         return Path(data_json_path)
 
     datadir = get_datadir(request.module)
-    assert datadir is not None
-    return datadir / "data.json"
+    return None if datadir is None else datadir / "data.json"
 
 
 @pytest.fixture(scope="module")
 def data_json(request: pytest.FixtureRequest) -> dict[str, Any] | None:
-    data_file = _find_data_json(request)
-    logger.debug(f"Loading data.json from {data_file}")
     try:
+        data_file = _find_data_json(request)
+        if data_file is None:
+            logger.debug("No location to load data.json from")
+            return None
+        logger.debug(f"Loading data.json from {data_file}")
         return json.loads(data_file.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        logger.debug(f"No data.json found at {data_file}")
+        logger.debug("No data.json found")
         return None
     except (OSError, ValueError) as e:
-        raise RuntimeError(f"Could not load {data_file.name}: {e}") from e
+        raise RuntimeError(f"Could not load data.json: {e}") from e
 
     # if datadir is None or not datadir.is_dir():
     #     raise ValueError(f"Data directory '{datadir}' not found or is not a directory.")
