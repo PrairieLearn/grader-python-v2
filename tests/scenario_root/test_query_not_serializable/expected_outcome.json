@@ -1,0 +1,72 @@
+{
+  "expected_data_object": {
+    "score": 0.875,
+    "tests": [
+      {
+        "max_points": 1,
+        "name": "raw_response",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_not_serializable.py::test_raw_response_has_all_fields[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "success_response",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_not_serializable.py::test_success_response_has_no_error[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "other_values",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_not_serializable.py::test_other_unserializable_values[student_code-nested-list]"
+      },
+      {
+        "max_points": 1,
+        "name": "other_values",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_not_serializable.py::test_other_unserializable_values[student_code-self_reference-list]"
+      },
+      {
+        "max_points": 1,
+        "name": "query",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_not_serializable.py::test_query_has_clear_error[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "sandbox_still_works",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_not_serializable.py::test_later_queries_still_work[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "not_found",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_not_serializable.py::test_missing_variable[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "assert_equal",
+        "points": 0.0,
+        "points_frac": 0.0,
+        "outcome": "failed",
+        "test_id": "test_query_not_serializable.py::test_assert_equal_shows_clear_error[student_code]",
+        "message": "Variable 'x' has a value of type Thing, which can't be sent back to the grader"
+      }
+    ]
+  }
+}

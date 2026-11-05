@@ -150,7 +150,7 @@ value = sandbox.query("variable_name")
 ```
 
 Retrieves the value of a variable defined in the student code or `setup_code.py`.
-Raises a `RuntimeError` if the variable doesn't exist.
+Raises a `NameError` if the variable doesn't exist, and a `RuntimeError` with a clear message if its value can't be sent back to the grader. Later queries on the sandbox still work after either error.
 
 **Example:**
 
