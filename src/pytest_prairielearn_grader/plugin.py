@@ -67,22 +67,20 @@ def get_datadir(test_module: ModuleType) -> Path | None:
     return data_dir
 
 
-def _find_data_json(module: Any) -> Path:
-    """Prefer the file PrairieLearn wrote for this grading job, which run.sh announces with JOB_DIR."""
-    job_dir = os.environ.get("JOB_DIR")
-    if job_dir:
-        job_data_file = Path(job_dir) / "data" / "data.json"
-        if job_data_file.is_file():
-            return job_data_file
+def _find_data_json(request: pytest.FixtureRequest) -> Path:
+    """Prefer the file named by --data-json-path, and otherwise use data.json next to the test file."""
+    data_json_path = request.config.getoption("--data-json-path")
+    if data_json_path is not None and Path(data_json_path).is_file():
+        return Path(data_json_path)
 
-    datadir = get_datadir(module)
+    datadir = get_datadir(request.module)
     assert datadir is not None
     return datadir / "data.json"
 
 
 @pytest.fixture(scope="module")
 def data_json(request: pytest.FixtureRequest) -> dict[str, Any] | None:
-    data_file = _find_data_json(request.module)
+    data_file = _find_data_json(request)
     logger.debug(f"Loading data.json from {data_file}")
     try:
         return json.loads(data_file.read_text(encoding="utf-8"))
@@ -688,6 +686,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     """
     group = parser.getgroup("pytest_pl_autograder", "Prairielearn Python Autograder Options")
 
+    group.addoption(
+        "--data-json-path",
+        action="store",
+        default=None,
+        help="Path to the data.json file for this grading job. If it doesn't exist, data.json next to the test file is used.",
+    )
     group.addoption(
         "--worker-username",
         action="store",

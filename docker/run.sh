@@ -5,7 +5,7 @@
 ##########################
 
 # the parent directory containing everything about this grading job
-export JOB_DIR="${JOB_DIR:-/grade}"
+JOB_DIR="${1:-/grade}"
 
 if [ ! -d "$JOB_DIR" ]; then
     echo "ERROR: $JOB_DIR not found! Mounting may have failed."
@@ -19,7 +19,7 @@ OUT_DIR=$JOB_DIR'/results'
 DATA_DIR=$JOB_DIR'/data'
 
 # where we will copy everything
-export MERGE_DIR=$JOB_DIR'/run'
+MERGE_DIR=$JOB_DIR'/run'
 
 # now set up the stuff so that our run.sh can work
 mkdir $MERGE_DIR
@@ -35,9 +35,10 @@ mv "$STUDENT_DIR" "$MERGE_DIR/test_student/student"
 mv $TEST_DIR/* $MERGE_DIR/test_student/
 mv $MERGE_DIR/test_student/test_student.py $MERGE_DIR/test_student.py
 
-# The data_json fixture reads data.json from the data directory. It can hold correct_answers, so
-# it's for the grader only. It must be owned by root with owner-only modes: student code keeps
-# root's supplementary groups, and its uid may match the owner of files mounted from the host.
+# PrairieLearn writes data.json to the data directory, and pytest is told to read it from there.
+# It can hold correct_answers, so it's for the grader only. It must be owned by root with
+# owner-only modes: student code keeps root's supplementary groups, and its uid may match the owner
+# of files mounted from the host.
 protect_data_json() {
     if [ "$(id -u)" = 0 ]; then
         chown -R root:root "$DATA_DIR" || return 1
@@ -62,8 +63,10 @@ fi
 echo "[run] starting autograder"
 
 # run the autograder as a limited user called ag
+# Pass --data-json-path with '=': pytest's first pass over the arguments, before plugin options are
+# registered, would treat a separate value as a test path.
 # Use --worker-username to drop privileges to the 'ag' user in the student code sandbox
-uv run pytest -p prairielearn-grader --color=no --log-cli-level=DEBUG --worker-username ag "$MERGE_DIR"
+uv run pytest -p prairielearn-grader --color=no --log-cli-level=DEBUG --worker-username ag --data-json-path="$DATA_DIR/data.json" "$MERGE_DIR"
 
 # TODO change the default output name
 mv "$MERGE_DIR/autograder_results.json" "$OUT_DIR/results.json"

@@ -68,8 +68,8 @@ def run_grader(job: Path, tmp_path: Path) -> subprocess.CompletedProcess[str]:
     fake_uv = bin_dir / "uv"
     fake_uv.write_text(FAKE_UV)
     fake_uv.chmod(0o755)
-    env = {**os.environ, "JOB_DIR": str(job), "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
-    return subprocess.run(["/bin/sh", str(RUN_SH)], env=env, capture_output=True, text=True, check=False)
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+    return subprocess.run(["/bin/sh", str(RUN_SH), str(job)], env=env, capture_output=True, text=True, check=False)
 
 
 def score(job: Path) -> float:
