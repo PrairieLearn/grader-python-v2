@@ -144,13 +144,18 @@ async def student_function_runner(
         function_response["value"] = to_json(result)
         return json.dumps(function_response)
     except Exception as e:
-        function_response["status"] = FunctionStatusCode.NOT_SERIALIZABLE
-        function_response["value"] = None
-        function_response["exception_name"] = type(e).__name__
-        function_response["exception_message"] = (
-            f"Function '{func_name}' returned a value of type {type(result).__name__}, which can't be sent back to the grader: {e}"
-        )
-        return json.dumps(function_response)
+        not_serializable_response: StudentFunctionResponse = {
+            "status": FunctionStatusCode.NOT_SERIALIZABLE,
+            "value": None,
+            "stdout": function_response["stdout"],
+            "stderr": function_response["stderr"],
+            "exception_name": type(e).__name__,
+            "exception_message": (
+                f"Function '{func_name}' returned a value of type {type(result).__name__}, which can't be sent back to the grader: {e}"
+            ),
+            "traceback": None,
+        }
+        return json.dumps(not_serializable_response)
 
 
 def get_custom_importer(
