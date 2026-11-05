@@ -4,14 +4,13 @@
 # INIT
 ##########################
 
-# the parent directory containing everything about this grading job
-JOB_DIR="${1:-/grade}"
-
-if [ ! -d "$JOB_DIR" ]; then
-    echo "ERROR: $JOB_DIR not found! Mounting may have failed."
+if [ ! -d /grade ]; then
+    echo "ERROR: /grade not found! Mounting may have failed."
     exit 1
 fi
 
+# the parent directory containing everything about this grading job
+JOB_DIR='/grade'
 # the job subdirectories
 STUDENT_DIR=$JOB_DIR'/student'
 TEST_DIR=$JOB_DIR'/tests'
@@ -40,9 +39,7 @@ mv $MERGE_DIR/test_student/test_student.py $MERGE_DIR/test_student.py
 # owner-only modes: student code keeps root's supplementary groups, and its uid may match the owner
 # of files mounted from the host.
 protect_data_json() {
-    if [ "$(id -u)" = 0 ]; then
-        chown -R root:root "$DATA_DIR" || return 1
-    fi
+    chown -R root:root "$DATA_DIR" || return 1
     chmod 700 "$DATA_DIR" && chmod 600 "$DATA_DIR/data.json"
 }
 
@@ -63,9 +60,9 @@ fi
 echo "[run] starting autograder"
 
 # run the autograder as a limited user called ag
+# Use --worker-username to drop privileges to the 'ag' user in the student code sandbox
 # Pass --data-json-path with '=': pytest's first pass over the arguments, before plugin options are
 # registered, would treat a separate value as a test path.
-# Use --worker-username to drop privileges to the 'ag' user in the student code sandbox
 uv run pytest -p prairielearn-grader --color=no --log-cli-level=DEBUG --worker-username ag --data-json-path="$DATA_DIR/data.json" "$MERGE_DIR"
 
 # TODO change the default output name
