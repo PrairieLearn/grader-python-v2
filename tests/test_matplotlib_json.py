@@ -28,6 +28,11 @@ def close_figures() -> Any:
     plt.close("all")
 
 
+def get_suptitle(figure: Any) -> str:
+    # The matplotlib stubs don't include Figure.get_suptitle.
+    return figure.get_suptitle()
+
+
 def round_trip(value: Any) -> Any:
     """Send a value through real JSON text, as the sandbox does."""
     return from_json(json.loads(json.dumps(to_json(value))))
@@ -44,7 +49,8 @@ def test_semilogy_axes() -> None:
 
     assert isinstance(figure, Figure)
     assert len(figure.axes) == 1
-    axes = figure.axes[0]
+    # The matplotlib stubs don't type get_yscale correctly.
+    axes: Any = figure.axes[0]
     assert axes.get_xscale() == "linear"
     assert axes.get_yscale() == "log"
     assert (axes.get_xlabel(), axes.get_ylabel(), axes.get_title()) == ("x", "f(x)", "Growth")
@@ -71,7 +77,7 @@ def test_figure_value_and_all_subplots_kept() -> None:
 
     for rebuilt in (from_figure, from_axes):
         assert isinstance(rebuilt, Figure)
-        assert rebuilt.get_suptitle() == "Both"
+        assert get_suptitle(rebuilt) == "Both"
         assert len(rebuilt.axes) == 2
         np.testing.assert_allclose(rebuilt.axes[0].get_lines()[0].get_ydata(), [3, 4])
         np.testing.assert_allclose(rebuilt.axes[1].get_lines()[0].get_ydata(), [7, 8])

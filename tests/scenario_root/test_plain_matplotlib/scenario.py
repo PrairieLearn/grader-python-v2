@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 import pytest
 from matplotcheck.base import PlotTester
@@ -19,7 +21,8 @@ EXPECTED_ERROR = (
 def check_semilogy(figure: Figure) -> None:
     assert isinstance(figure, Figure)
     assert len(figure.axes) == 1
-    axes = figure.axes[0]
+    # The matplotlib stubs don't type get_yscale correctly.
+    axes: Any = figure.axes[0]
     assert axes.get_xscale() == "linear"
     assert axes.get_yscale() == "log"
     x, y = axes.get_lines()[0].get_data()
