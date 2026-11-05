@@ -61,6 +61,41 @@ def to_json(v: Any) -> Any:
     return v
 
 
+def is_json_transportable(v: Any) -> bool:
+    """
+    Return True if to_json and from_json can carry this value without changing what it is.
+
+    This is deliberately strict: tuples, sets, non-string dict keys and subclasses would change
+    type or fail in JSON, so they return False. to_json only converts NumPy and pandas values
+    at the top level, so they return False when nested. Keep this in step with to_json.
+    """
+    module = type(v).__module__.split(".")[0]
+    if module == "numpy":
+        import numpy as np
+
+        if isinstance(v, np.ndarray):
+            return v.dtype.kind in "biufc"
+        return isinstance(v, np.number | np.bool_)
+    if module == "pandas":
+        import pandas as pd
+
+        return isinstance(v, pd.DataFrame)
+    try:
+        return _is_plain_json(v)
+    except RecursionError:
+        return False
+
+
+def _is_plain_json(v: Any) -> bool:
+    if type(v) in (type(None), bool, int, float, str):
+        return True
+    if type(v) is list:
+        return all(_is_plain_json(item) for item in v)
+    if type(v) is dict:
+        return all(type(key) is str and _is_plain_json(item) for key, item in v.items())
+    return False
+
+
 def _has_value_fields(v, fields: list[str]) -> bool:
     """Return True if all fields in the '_value' dictionary are present."""
     return "_value" in v and isinstance(v["_value"], dict) and all(field in v["_value"] for field in fields)

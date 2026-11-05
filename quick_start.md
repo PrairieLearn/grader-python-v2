@@ -273,7 +273,7 @@ value = sandbox.query_setup("variable_name")
 ```
 
 Returns a variable from `setup_code.py`, including ones that aren't passed to the student in `names_for_user`.
-Values can be any object `dill` can serialize, including functions:
+Values can be functions and other objects, as long as JSON or `dill` can serialize them:
 
 ```python
 @pytest.mark.grading_data(name="Check Answer", points=2)
@@ -282,12 +282,17 @@ def test_answer(sandbox: StudentFixture) -> None:
     assert sandbox.query("answer") == expected
 ```
 
-- **Values are captured before student code runs.** You get the value as it was when setup code finished, and student code can't change it.
+How a value reaches your test depends on its type:
+
+| Value | How it's sent | Can student code change it? |
+| --- | --- | --- |
+| Numbers, strings, `bool`, `None`, lists and string-keyed dicts of these, numeric NumPy arrays and scalars, pandas DataFrames | As JSON, only when queried | It could, so don't rely on these values if students are working around the sandbox. It can't run code in the grader this way |
+| Everything else, such as functions, classes, tuples, sets and other objects | Encoded with `dill` before student code runs | No |
+
+- **Large values:** prefer the JSON types for large data, because they add nothing to sandbox start time. Other values are encoded every time a sandbox starts, whether or not they're queried. Pass a longer `query_timeout` when querying large values, for example `sandbox.query_setup("data", query_timeout=10.0)`. The default is 1 second.
 - **Each call returns a new copy.** Changing it doesn't affect the sandbox or later calls.
 - **Missing variables** raise a `NameError`.
-- **Values `dill` can't serialize**, such as generators, raise a `TypeError` that names the variable. Other setup variables still work.
-
-Because every setup variable is serialized for each sandbox, keep large or slow-to-serialize values out of the top level of `setup_code.py` when you can.
+- **Values that can't be serialized**, such as generators, raise a `TypeError` that names the variable. Other setup variables still work.
 
 ## Partial Credit and Feedback
 

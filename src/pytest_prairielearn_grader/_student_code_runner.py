@@ -20,6 +20,7 @@ from copy import deepcopy
 from typing import Any
 
 from pytest_prairielearn_grader.json_utils import from_server_json
+from pytest_prairielearn_grader.json_utils import is_json_transportable
 
 # TODO make it so that other files in this package cannot import from this one
 # ask Gemini how to do it
@@ -29,7 +30,9 @@ from pytest_prairielearn_grader.utils import ProcessStartRequest
 from pytest_prairielearn_grader.utils import ProcessStartResponse
 from pytest_prairielearn_grader.utils import ProcessStatusCode
 from pytest_prairielearn_grader.utils import QueryStatusCode
+from pytest_prairielearn_grader.utils import SetupQueryRequest
 from pytest_prairielearn_grader.utils import SetupQueryResponse
+from pytest_prairielearn_grader.utils import SetupSnapshotEntry
 from pytest_prairielearn_grader.utils import SetupSnapshotMessage
 from pytest_prairielearn_grader.utils import StudentFunctionRequest
 from pytest_prairielearn_grader.utils import StudentFunctionResponse
@@ -143,17 +146,25 @@ async def student_function_runner(
     return function_response
 
 
-def encode_setup_variables(local_vars: dict[str, Any]) -> dict[str, SetupQueryResponse]:
+def encode_setup_variables(local_vars: dict[str, Any]) -> dict[str, SetupSnapshotEntry]:
     """
-    Dill-encode each setup variable for the grader.
+    Dill-encode the setup variables that JSON can't represent, such as functions.
 
-    Each variable is encoded on its own so that one value dill can't handle only
-    fails a query for that value, not the whole sandbox.
+    Other variables aren't encoded here, so large data doesn't slow down starting the sandbox.
+    They're sent as JSON if they're queried. Each variable is encoded on its own so that one
+    value dill can't handle only fails a query for that value, not the whole sandbox.
     """
-    encoded: dict[str, SetupQueryResponse] = {}
+    encoded: dict[str, SetupSnapshotEntry] = {}
     for name, value in local_vars.items():
+        if is_json_transportable(value):
+            continue
         try:
-            encoded[name] = {"status": QueryStatusCode.SUCCESS, "value_encoded": serialize_object_unsafe(value), "error": None}
+            # recurse leaves out globals a function doesn't use, which can include large data.
+            encoded[name] = {
+                "status": QueryStatusCode.SUCCESS,
+                "value_encoded": serialize_object_unsafe(value, recurse=True),
+                "error": None,
+            }
         except Exception as e:
             encoded[name] = {"status": QueryStatusCode.NOT_SERIALIZABLE, "value_encoded": "", "error": f"{type(e).__name__}: {e}"}
     return encoded
@@ -231,7 +242,7 @@ async def student_code_runner(
     builtin_whitelist: list[str] | None,
     names_for_user_list: list[str] | None,
     on_setup_complete: Callable[[dict[str, Any]], Awaitable[None]],
-) -> tuple[dict[str, Any], ProcessStartResponse]:
+) -> tuple[dict[str, Any], dict[str, Any], ProcessStartResponse]:
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
     execution_error: Exception | None = None
@@ -319,7 +330,7 @@ async def student_code_runner(
         "execution_traceback": str(exception_traceback),
     }
 
-    return student_code_vars, result_dict
+    return local_vars, student_code_vars, result_dict
 
 
 async def workspace_runner(
@@ -447,6 +458,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
     try:
         student_code_vars: None | dict = None
+        local_vars: None | dict = None
         workspace_mode: bool = False
 
         async for line_bytes in reader:
@@ -500,7 +512,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     if not await reader.readline():
                         raise ConnectionError("Grader disconnected before acknowledging the setup snapshot.")
 
-                student_code_vars, start_response = await student_code_runner(
+                local_vars, student_code_vars, start_response = await student_code_runner(
                     setup_code=setup_code,
                     student_code=student_code,
                     student_file_name=student_file_name,
@@ -514,6 +526,30 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 )
 
                 writer.write((json.dumps(start_response) + os.linesep).encode())
+
+            elif msg_type == "query_setup":
+                assert local_vars is not None
+                query_setup_json_message: SetupQueryRequest = json_message
+
+                var_to_query = query_setup_json_message["var"]
+                setup_query_response: SetupQueryResponse
+                if var_to_query not in local_vars:
+                    setup_query_response = {"status": QueryStatusCode.NOT_FOUND, "value": None, "error": None}
+                    encoded_response = json.dumps(setup_query_response)
+                else:
+                    setup_query_response = {"status": QueryStatusCode.SUCCESS, "value": None, "error": None}
+                    try:
+                        setup_query_response["value"] = to_json(local_vars[var_to_query])
+                        encoded_response = json.dumps(setup_query_response)
+                    except Exception as e:
+                        setup_query_response = {
+                            "status": QueryStatusCode.NOT_SERIALIZABLE,
+                            "value": None,
+                            "error": f"{type(e).__name__}: {e}",
+                        }
+                        encoded_response = json.dumps(setup_query_response)
+
+                writer.write((encoded_response + os.linesep).encode())
 
             elif msg_type == "query":
                 assert student_code_vars is not None

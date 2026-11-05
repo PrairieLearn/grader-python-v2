@@ -4,11 +4,19 @@
     "tests": [
       {
         "max_points": 1,
-        "name": "data_values",
+        "name": "json_values",
         "points": 1.0,
         "points_frac": 1.0,
         "outcome": "passed",
-        "test_id": "test_query_setup_snapshot.py::test_setup_values_ignore_student_changes[student_code]"
+        "test_id": "test_query_setup_snapshot.py::test_json_values_sent_on_demand[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "dill_values",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_setup_snapshot.py::test_values_json_would_change_keep_their_types[student_code]"
       },
       {
         "max_points": 1,
@@ -16,7 +24,7 @@
         "points": 1.0,
         "points_frac": 1.0,
         "outcome": "passed",
-        "test_id": "test_query_setup_snapshot.py::test_setup_functions_are_returned[student_code]"
+        "test_id": "test_query_setup_snapshot.py::test_setup_functions_ignore_student_changes[student_code]"
       },
       {
         "max_points": 1,
@@ -25,6 +33,22 @@
         "points_frac": 1.0,
         "outcome": "passed",
         "test_id": "test_query_setup_snapshot.py::test_setup_function_globals_exclude_student_values[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "forged_json",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_setup_snapshot.py::test_forged_json_response_cannot_run_code[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "replaced_value",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_query_setup_snapshot.py::test_value_replaced_with_object_has_clear_error[student_code]"
       },
       {
         "max_points": 1,

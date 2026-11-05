@@ -15,8 +15,10 @@ from .utils import ProcessStartRequest
 from .utils import ProcessStartResponse
 from .utils import ProcessStatusCode
 from .utils import QueryStatusCode
+from .utils import SetupQueryRequest
 from .utils import SetupQueryResponse
 from .utils import SetupSnapshotAck
+from .utils import SetupSnapshotEntry
 from .utils import SetupSnapshotMessage
 from .utils import StudentFunctionRequest
 from .utils import StudentFunctionResponse
@@ -323,7 +325,7 @@ class StudentFixture(_SandboxBase):
     trailing_file: Path
     student_code_file: Path
     setup_code_file: Path
-    _setup_snapshot: dict[str, SetupQueryResponse] | None
+    _setup_snapshot: dict[str, SetupSnapshotEntry] | None
 
     def __init__(
         self,
@@ -400,28 +402,39 @@ class StudentFixture(_SandboxBase):
         ack: SetupSnapshotAck = {"message_type": "setup_snapshot_ack"}
         self._send_json_object(ack)
 
-    def query_setup_raw(self, var_to_query: str) -> SetupQueryResponse:
-        """Look up a setup variable in the snapshot taken before student code ran."""
+    def query_setup_raw(self, var_to_query: str, *, query_timeout: float = DEFAULT_TIMEOUT) -> SetupQueryResponse:
+        """Ask the sandbox for a setup variable as JSON. Never deserialize dill from this response."""
+        self._assert_process_running()
+        json_message: SetupQueryRequest = {"message_type": "query_setup", "var": var_to_query}
+        assert self.student_socket is not None, "Student socket is not connected. Please start the student code server first."
+        self.student_socket.settimeout(query_timeout)
+        self._send_json_object(json_message)
+        data: SetupQueryResponse = json.loads(self._read_from_socket().decode())
+        return data
+
+    def query_setup(self, var_to_query: str, *, query_timeout: float = DEFAULT_TIMEOUT) -> Any:
+        """
+        Return a value from the setup code.
+
+        Values JSON can't represent, such as functions, were dill-encoded before student code
+        started, so they hold nothing from the student and are read from that stored copy.
+        Other values stay in the sandbox and are sent as JSON when queried. Student code could
+        change these, but they can't run code in the grader.
+        """
         assert self._setup_snapshot is not None, "Setup variables are not available. Please start the student code server first."
-        response = self._setup_snapshot.get(var_to_query)
-        if response is None:
-            return {"status": QueryStatusCode.NOT_FOUND, "value_encoded": "", "error": None}
-        return response
+        snapshot_entry = self._setup_snapshot.get(var_to_query)
+        if snapshot_entry is not None:
+            if snapshot_entry["status"] == QueryStatusCode.NOT_SERIALIZABLE:
+                raise TypeError(f"Setup variable '{var_to_query}' could not be serialized with dill: {snapshot_entry['error']}")
+            return deserialize_object_unsafe(snapshot_entry["value_encoded"])
 
-    def query_setup(self, var_to_query: str) -> Any:
-        """
-        Return a value from the setup code, as it was when setup code finished.
-
-        This doesn't contact the sandbox. Values are dill-encoded before student code
-        starts, so they can include functions and hold nothing from the student.
-        """
-        response = self.query_setup_raw(var_to_query)
+        response = self.query_setup_raw(var_to_query, query_timeout=query_timeout)
         match response["status"]:
             case QueryStatusCode.NOT_FOUND:
                 raise NameError(f"Query for setup variable '{var_to_query}' failed")
             case QueryStatusCode.NOT_SERIALIZABLE:
-                raise TypeError(f"Setup variable '{var_to_query}' could not be serialized with dill: {response['error']}")
-        return deserialize_object_unsafe(response["value_encoded"])
+                raise TypeError(f"Setup variable '{var_to_query}' could not be serialized as JSON: {response['error']}")
+        return from_json(response["value"])
 
     # TODO add functions that let instructors use the student fixture
     # use the stuff pete set up here: https://github.com/reteps/pytest-autograder-prototype
