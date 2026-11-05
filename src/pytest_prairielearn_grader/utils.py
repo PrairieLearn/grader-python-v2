@@ -25,6 +25,7 @@ class QueryStatusCode(StrEnum):
 
     SUCCESS = "success"
     NOT_FOUND = "not_found"
+    NOT_SERIALIZABLE = "not_serializable"
 
 
 class FunctionStatusCode(StrEnum):
@@ -107,6 +108,7 @@ class StudentQueryResponse(TypedDict):
     # This is meant to be deserialized into a Python object
     status: QueryStatusCode
     value: Any
+    error: str | None
 
 
 # Function query dict types
