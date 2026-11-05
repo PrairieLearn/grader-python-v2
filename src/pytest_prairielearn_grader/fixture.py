@@ -14,6 +14,7 @@ from .utils import FunctionStatusCode
 from .utils import ProcessStartRequest
 from .utils import ProcessStartResponse
 from .utils import ProcessStatusCode
+from .utils import QueryStatusCode
 from .utils import SetupQueryRequest
 from .utils import SetupQueryResponse
 from .utils import StudentFunctionRequest
@@ -243,8 +244,11 @@ class _SandboxBase:
     def query(self, var_to_query: str, *, query_timeout: float = DEFAULT_TIMEOUT) -> Any:
         """Query a variable from the student sandbox by name."""
         response = self.query_raw(var_to_query, query_timeout=query_timeout)
-        if response["status"] == "not_found":
-            raise NameError(f"Query for '{var_to_query}' failed")
+        match response["status"]:
+            case QueryStatusCode.NOT_FOUND:
+                raise NameError(f"Query for '{var_to_query}' failed")
+            case QueryStatusCode.NOT_SERIALIZABLE:
+                raise RuntimeError(response["error"])
         return from_json(response["value"])
 
     def query_function_raw(

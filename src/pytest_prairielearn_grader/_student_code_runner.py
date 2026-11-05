@@ -529,14 +529,23 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     else:
                         raise KeyError(var_to_query)
 
-                    query_response: StudentQueryResponse = {
-                        "status": QueryStatusCode.SUCCESS,
-                        "value": to_json(value),
-                    }
                 except (KeyError, AttributeError, ImportError):
-                    query_response = {"status": QueryStatusCode.NOT_FOUND, "value": ""}
+                    not_found_response: StudentQueryResponse = {"status": QueryStatusCode.NOT_FOUND, "value": "", "error": None}
+                    encoded_query_response = json.dumps(not_found_response)
+                else:
+                    try:
+                        query_response: StudentQueryResponse = {"status": QueryStatusCode.SUCCESS, "value": to_json(value), "error": None}
+                        encoded_query_response = json.dumps(query_response)
+                    except Exception as e:
+                        not_serializable_response: StudentQueryResponse = {
+                            "status": QueryStatusCode.NOT_SERIALIZABLE,
+                            "value": None,
+                            "error": f"Variable '{var_to_query}' has a value of type {type(value).__name__}, "
+                            f"which can't be sent back to the grader: {e}",
+                        }
+                        encoded_query_response = json.dumps(not_serializable_response)
 
-                writer.write((json.dumps(query_response) + os.linesep).encode())
+                writer.write((encoded_query_response + os.linesep).encode())
 
             elif msg_type == "query_function":
                 assert student_code_vars is not None
