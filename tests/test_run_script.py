@@ -72,37 +72,53 @@ def run_grader(job: Path, tmp_path: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["/bin/sh", str(RUN_SH)], env=env, capture_output=True, text=True, check=False)
 
 
+def score(job: Path) -> float:
+    return json.loads((job / "results" / "results.json").read_text())["score"]
+
+
 def test_data_json_reaches_grader_and_sandbox(job_dir: Path, tmp_path: Path) -> None:
-    content = json.dumps({"params": {"expected": 42}, "correct_answers": {"x": 1}})
-    write_data_json(job_dir, content)
+    write_data_json(job_dir, json.dumps({"params": {"expected": 42}, "correct_answers": {"x": 1}}))
 
     run_grader(job_dir, tmp_path)
 
-    assert json.loads((job_dir / "results" / "results.json").read_text())["score"] == 1.0
-    assert (job_dir / "run" / "test_student" / "data.json").read_text() == content
+    assert score(job_dir) == 1.0
 
 
-def test_data_json_copies_are_owner_only(job_dir: Path, tmp_path: Path) -> None:
+def test_data_json_is_owner_only_and_not_copied(job_dir: Path, tmp_path: Path) -> None:
     data_file = write_data_json(job_dir, json.dumps({"params": {"expected": 42}}))
 
     run_grader(job_dir, tmp_path)
 
-    assert mode(job_dir / "run" / "test_student" / "data.json") == 0o600
     assert mode(data_file) == 0o600
     assert mode(data_file.parent) == 0o700
+    assert not (job_dir / "run" / "test_student" / "data.json").exists()
 
 
-def test_prairielearn_data_json_replaces_one_from_tests(job_dir: Path, tmp_path: Path) -> None:
-    stale = job_dir / "tests" / "data.json"
-    stale.write_text(json.dumps({"params": {"expected": 0}}))
-    stale.chmod(0o644)
+def test_prairielearn_data_json_takes_precedence_over_tests(job_dir: Path, tmp_path: Path) -> None:
+    (job_dir / "tests" / "data.json").write_text(json.dumps({"params": {"expected": 0}}))
     write_data_json(job_dir, json.dumps({"params": {"expected": 42}}))
 
     run_grader(job_dir, tmp_path)
 
-    delivered = job_dir / "run" / "test_student" / "data.json"
-    assert json.loads(delivered.read_text())["params"]["expected"] == 42
-    assert mode(delivered) == 0o600
+    assert score(job_dir) == 1.0
+
+
+def test_data_json_from_tests_used_without_prairielearn_file(job_dir: Path, tmp_path: Path) -> None:
+    (job_dir / "tests" / "data.json").write_text(json.dumps({"params": {"expected": 42}}))
+
+    run_grader(job_dir, tmp_path)
+
+    assert score(job_dir) == 1.0
+
+
+def test_invalid_prairielearn_data_json_is_an_error(job_dir: Path, tmp_path: Path) -> None:
+    write_data_json(job_dir, '{"params": ')
+
+    run_grader(job_dir, tmp_path)
+
+    results = json.loads((job_dir / "results" / "results.json").read_text())
+    assert results["score"] == 0.0
+    assert "Could not load data.json" in results["tests"][0]["message"]
 
 
 def test_missing_data_json_still_grades(job_dir: Path, tmp_path: Path) -> None:
@@ -111,5 +127,5 @@ def test_missing_data_json_still_grades(job_dir: Path, tmp_path: Path) -> None:
 
     run_grader(job_dir, tmp_path)
 
-    assert json.loads((job_dir / "results" / "results.json").read_text())["score"] == 1.0
+    assert score(job_dir) == 1.0
     assert not (job_dir / "run" / "test_student" / "data.json").exists()

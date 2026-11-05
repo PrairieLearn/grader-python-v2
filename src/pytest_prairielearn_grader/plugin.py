@@ -67,11 +67,22 @@ def get_datadir(test_module: ModuleType) -> Path | None:
     return data_dir
 
 
+def _find_data_json(module: Any) -> Path:
+    """Prefer the file PrairieLearn wrote for this grading job, which run.sh announces with JOB_DIR."""
+    job_dir = os.environ.get("JOB_DIR")
+    if job_dir:
+        job_data_file = Path(job_dir) / "data" / "data.json"
+        if job_data_file.is_file():
+            return job_data_file
+
+    datadir = get_datadir(module)
+    assert datadir is not None
+    return datadir / "data.json"
+
+
 @pytest.fixture(scope="module")
 def data_json(request: pytest.FixtureRequest) -> dict[str, Any] | None:
-    datadir = get_datadir(request.module)
-    assert datadir is not None
-    data_file = datadir / "data.json"
+    data_file = _find_data_json(request.module)
     logger.debug(f"Loading data.json from {data_file}")
     try:
         return json.loads(data_file.read_text(encoding="utf-8"))

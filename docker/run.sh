@@ -35,24 +35,17 @@ mv "$STUDENT_DIR" "$MERGE_DIR/test_student/student"
 mv $TEST_DIR/* $MERGE_DIR/test_student/
 mv $MERGE_DIR/test_student/test_student.py $MERGE_DIR/test_student.py
 
-# PrairieLearn writes data.json to the data directory, but the data_json fixture reads it from
-# the directory next to the test file. It can hold correct_answers, so both copies are for the
-# grader only. They must be owned by root with owner-only modes: student code keeps root's
-# supplementary groups, and its uid may match the owner of files mounted from the host.
-deliver_data_json() {
+# The data_json fixture reads data.json from the data directory. It can hold correct_answers, so
+# it's for the grader only. It must be owned by root with owner-only modes: student code keeps
+# root's supplementary groups, and its uid may match the owner of files mounted from the host.
+protect_data_json() {
     if [ "$(id -u)" = 0 ]; then
         chown -R root:root "$DATA_DIR" || return 1
     fi
-    chmod 700 "$DATA_DIR" || return 1
-    chmod 600 "$DATA_DIR/data.json" || return 1
-    (
-        umask 077
-        rm -f "$MERGE_DIR/test_student/data.json"
-        cp "$DATA_DIR/data.json" "$MERGE_DIR/test_student/data.json"
-    )
+    chmod 700 "$DATA_DIR" && chmod 600 "$DATA_DIR/data.json"
 }
 
-if [ -f "$DATA_DIR/data.json" ] && ! deliver_data_json; then
+if [ -f "$DATA_DIR/data.json" ] && ! protect_data_json; then
     echo '{"succeeded": false, "score": 0.0, "message": "The autograder could not protect its grading data. Please contact course staff and have them check the logs for this submission."}' > "$OUT_DIR/results.json"
     echo "ERROR: could not protect $DATA_DIR/data.json"
     exit 1
