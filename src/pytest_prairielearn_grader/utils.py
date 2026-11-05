@@ -34,12 +34,16 @@ class FunctionStatusCode(StrEnum):
     A timeout indicates that the function call did not produce a response within
     the requested interval. Callers must stop issuing requests on that sandbox
     after receiving this status.
+
+    NOT_SERIALIZABLE means the function finished but its return value can't be sent
+    to the grader. The sandbox can still be used after this status.
     """
 
     SUCCESS = "success"
     EXCEPTION = "exception"
     TIMEOUT = "timeout"
     NOT_FOUND = "not_found"
+    NOT_SERIALIZABLE = "not_serializable"
 
 
 class ProcessStatusCode(StrEnum):

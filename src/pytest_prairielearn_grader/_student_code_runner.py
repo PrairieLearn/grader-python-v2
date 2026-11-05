@@ -94,7 +94,8 @@ async def student_function_runner(
     args_tup: Any,
     kwargs_dict: Any,
     workspace_mode: bool = False,
-) -> StudentFunctionResponse:
+) -> str:
+    """Run a student function and return its StudentFunctionResponse encoded as a JSON string."""
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
     execution_error: Exception | None = None
@@ -131,7 +132,7 @@ async def student_function_runner(
             if timed_out
             else FunctionStatusCode.EXCEPTION
         ),
-        "value": to_json(result),
+        "value": None,
         "stdout": stdout_capture.getvalue(),
         "stderr": stderr_capture.getvalue(),
         "exception_name": type(execution_error).__name__,
@@ -139,7 +140,22 @@ async def student_function_runner(
         "traceback": exception_traceback,
     }
 
-    return function_response
+    try:
+        function_response["value"] = to_json(result)
+        return json.dumps(function_response)
+    except Exception as e:
+        not_serializable_response: StudentFunctionResponse = {
+            "status": FunctionStatusCode.NOT_SERIALIZABLE,
+            "value": None,
+            "stdout": function_response["stdout"],
+            "stderr": function_response["stderr"],
+            "exception_name": type(e).__name__,
+            "exception_message": (
+                f"Function '{func_name}' returned a value of type {type(result).__name__}, which can't be sent back to the grader: {e}"
+            ),
+            "traceback": None,
+        }
+        return json.dumps(not_serializable_response)
 
 
 def get_custom_importer(
@@ -531,11 +547,11 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 kwargs = deserialize_object_unsafe(query_function_json_message["kwargs_encoded"])
                 query_timeout = query_function_json_message["query_timeout"]
 
-                function_response = await student_function_runner(
+                encoded_function_response = await student_function_runner(
                     student_code_vars, func_name, query_timeout, args, kwargs, workspace_mode=workspace_mode
                 )
 
-                writer.write((json.dumps(function_response) + os.linesep).encode())
+                writer.write((encoded_function_response + os.linesep).encode())
 
             # TODO handle cases of different payloads
             # The first payload should be student code
