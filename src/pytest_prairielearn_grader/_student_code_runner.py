@@ -622,4 +622,6 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Student code runs on a worker thread with no display, so matplotlib must not pick a GUI backend.
+    os.environ.setdefault("MPLBACKEND", "Agg")
     asyncio.run(main())

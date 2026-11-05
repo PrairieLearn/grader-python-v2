@@ -264,7 +264,7 @@ result = sandbox.query_function("slow_computation", data, query_timeout=2.0)
 
 **Note**: Student code must define the queried symbols, and return values must be JSON-serializable.
 Supported types include: `int`, `float`, `str`, `list`, `dict`, `bool`, `None`, numpy arrays, pandas DataFrames,
-and plots built with `MatplotlibSerializer` (see [Testing Matplotlib Plots](#testing-matplotlib-plots)).
+and matplotlib plots (see [Testing Matplotlib Plots](#testing-matplotlib-plots)).
 
 ## Partial Credit and Feedback
 
@@ -952,24 +952,38 @@ since students can learn from reading full tracebacks.
 
 ### Testing Matplotlib Plots
 
-To grade a plot, student code builds it with `MatplotlibSerializer` from the `plot-serializer` package and returns the serializer. The test receives a matplotlib `Figure`.
-
-`plot-serializer` is included in the `:latest` image but not in `:lite`. Returning a plain matplotlib `Figure` from student code isn't supported.
+Student code can use matplotlib as usual and provide the plot's `Axes` or `Figure`. The test receives a matplotlib `Figure`.
 
 ```python
 # Student code
-from plot_serializer.matplotlib.serializer import MatplotlibSerializer
+import matplotlib.pyplot as plt
 
 
 def create_plot(data):
-    serializer = MatplotlibSerializer()
-    fig, ax = serializer.subplots()
-    ax.plot(data)
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Value")
-    ax.set_title("Data Visualization")
-    return serializer
+    plt.plot(data)
+    plt.xlabel("Time")
+    plt.ylabel("Value")
+    plt.title("Data Visualization")
+    return plt.gca()
 ```
+
+An `Axes` value brings its whole figure, so subplots are never lost: use `figure.axes` in your test to get each one, in the order the student created them.
+
+What's sent to the test:
+
+- **Lines**, with their data, label, color, width, style, marker and draw style. This includes `plot`, `semilogy`, `loglog` and `step`.
+- **Scatter points**, with their positions, sizes and colors.
+- **Bars and histograms**, with their positions, sizes, colors and orientation.
+- **Axes details:** scales, labels, titles, limits, position and legend labels. Twin axes come back as separate axes in `figure.axes`.
+- **Figure details:** size and overall title.
+
+Other plot content makes the query fail with a message saying what isn't supported, rather than losing data. This includes `errorbar`, `stem`, `fill_between`, `pie`, `imshow`, `contour`, `vlines` and `hlines`, `axhline` and `axvline`, `axvspan`, text and annotations, colormapped scatter plots, polar axes, inset axes and subfigures.
+
+Some details aren't sent, so don't grade them: grid lines, tick positions and labels, line and marker transparency set separately from color, scatter marker shapes, the base of a log scale, and `symlog` settings. Values are sent as decimal numbers, and dates come back as matplotlib date numbers (use `matplotlib.dates.num2date` to convert them). Categories on a line come back as strings.
+
+Importing matplotlib can take most of the default 1-second sandbox timeout, so set a longer one in plot questions, such as `sandbox_timeout = 15` at the top of the test file.
+
+Student code can instead build the plot with `MatplotlibSerializer` from the `plot-serializer` package and return the serializer, which also arrives as a `Figure`. `matplotlib` and `plot-serializer` are included in the `:latest` image but not in `:lite`.
 
 ```python
 # Test code
@@ -985,7 +999,7 @@ from pytest_prairielearn_grader.fixture import StudentFixture
 @pytest.mark.grading_data(name="Plot Test", points=5)
 def test_student_plot(sandbox: StudentFixture) -> None:
     """Test that student creates a correct plot."""
-    # Student function returns a MatplotlibSerializer, which arrives here as a Figure
+    # Student function returns an Axes or Figure, which arrives here as a Figure
     plot = sandbox.query_function("create_plot", data)
 
     assert isinstance(plot, Figure)
@@ -1004,7 +1018,7 @@ def test_student_plot(sandbox: StudentFixture) -> None:
 
 The grader automatically serializes/deserializes:
 
-- Plots built with `MatplotlibSerializer` (received as a `Figure`)
+- Matplotlib `Axes` and `Figure` values, and plots built with `MatplotlibSerializer` (received as a `Figure`)
 - NumPy arrays
 - Pandas DataFrames
 - Standard Python types (int, float, str, list, dict, bool, None)
