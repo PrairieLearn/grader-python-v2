@@ -228,7 +228,7 @@ def test_raises_value_error(sandbox: StudentFixture, feedback: FeedbackFixture) 
 
 The `query_function_raw` response contains:
 
-- `status`: One of `"success"`, `"exception"`, `"timeout"`, or `"not_found"`
+- `status`: One of `"success"`, `"exception"`, `"timeout"`, `"not_found"`, or `"not_serializable"`. `"not_serializable"` means the function finished, but its return value can't be sent back to the grader. `exception_message` explains this, and later queries on the sandbox still work.
 - `value`: The return value (when status is `"success"`)
 - `stdout` / `stderr`: Captured output from the function call
 - `exception_name`: The exception class name (e.g., `"ValueError"`)
