@@ -61,9 +61,9 @@ echo "[run] starting autograder"
 
 # run the autograder as a limited user called ag
 # Use --worker-username to drop privileges to the 'ag' user in the student code sandbox
-# Pass --data-json-path with '=': pytest's first pass over the arguments, before plugin options are
+# Pass plugin options with '=': pytest's first pass over the arguments, before plugin options are
 # registered, would treat a separate value as a test path.
-uv run pytest -p prairielearn-grader --color=no --log-cli-level=DEBUG --worker-username ag --data-json-path="$DATA_DIR/data.json" "$MERGE_DIR"
+uv run pytest -p prairielearn-grader --color=no --log-cli-level=DEBUG --worker-username=ag --data-json-path="$DATA_DIR/data.json" "$MERGE_DIR"
 
 # TODO change the default output name
 mv "$MERGE_DIR/autograder_results.json" "$OUT_DIR/results.json"
