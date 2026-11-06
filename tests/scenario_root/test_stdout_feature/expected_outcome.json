@@ -60,7 +60,7 @@
       },
       {
         "test_id": "test_stdout_feature.py::test_global_scope_stdout[student_code]",
-        "message": "Student code grading failed with an exception: RuntimeError\nException Message: Function 'get_global_message' raised an exception KeyError: 'get_global_message'",
+        "message": "Student code grading failed with an exception: NameError\nException Message: Function 'get_global_message' wasn't found in the student code",
         "max_points": 2,
         "points_frac": 0.0,
         "points": 0.0,

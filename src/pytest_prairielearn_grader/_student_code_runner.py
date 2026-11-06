@@ -90,6 +90,36 @@ def _resolve_dotted_name(name: str, student_code_vars: dict[str, Any]) -> Any:
     return student_code_vars[name]
 
 
+class _FunctionNotFoundError(Exception):
+    """The requested function doesn't exist. Only the lookup raises this, never the student's call."""
+
+
+def _look_up_function(name: str, student_code_vars: dict[str, Any], workspace_mode: bool) -> Any:
+    """
+    Find a student function by name, raising _FunctionNotFoundError if it doesn't exist.
+
+    In workspace mode, importing a dotted name's module runs student code. If that code fails, the
+    error isn't caught here unless the failure is that the requested module itself doesn't exist,
+    so a student module that exists but has a bad import is reported as an exception.
+    """
+    not_found = _FunctionNotFoundError(f"Function '{name}' wasn't found in the student code")
+    if workspace_mode and "." in name:
+        module_path, attr_name = name.rsplit(".", 1)
+        try:
+            module = importlib.import_module(module_path)
+        except ModuleNotFoundError as e:
+            if e.name is not None and (module_path == e.name or module_path.startswith(f"{e.name}.")):
+                raise not_found from e
+            raise
+        try:
+            return getattr(module, attr_name)
+        except AttributeError as e:
+            raise not_found from e
+    if name not in student_code_vars:
+        raise not_found
+    return student_code_vars[name]
+
+
 async def student_function_runner(
     student_code_vars: dict[str, Any],
     func_name: str,
@@ -105,14 +135,12 @@ async def student_function_runner(
     exception_traceback: str | None = None
     result = None
     timed_out = False
+    function_not_found = False
 
     try:
 
         def student_function_temp() -> Any:
-            if workspace_mode:
-                student_function = _resolve_dotted_name(func_name, student_code_vars)
-            else:
-                student_function = student_code_vars[func_name]
+            student_function = _look_up_function(func_name, student_code_vars, workspace_mode)
             return student_function(*args_tup, **kwargs_dict)
 
         with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
@@ -123,6 +151,9 @@ async def student_function_runner(
             else:
                 execution_error = asyncio.TimeoutError(f"Function timed out after {timeout} seconds")
                 timed_out = True
+    except _FunctionNotFoundError as e:
+        execution_error = NameError(str(e))
+        function_not_found = True
     except Exception as e:
         execution_error = e
         exception_traceback = traceback.format_exc(limit=-1)
@@ -133,6 +164,8 @@ async def student_function_runner(
             if execution_error is None
             else FunctionStatusCode.TIMEOUT
             if timed_out
+            else FunctionStatusCode.NOT_FOUND
+            if function_not_found
             else FunctionStatusCode.EXCEPTION
         ),
         "value": None,
