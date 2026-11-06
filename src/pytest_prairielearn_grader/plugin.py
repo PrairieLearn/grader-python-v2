@@ -131,6 +131,27 @@ def _load_helper_modules(
     return sources
 
 
+def _find_helper_name_clashes(workspace_dir: Path, helper_modules: dict[str, str] | None) -> list[str]:
+    """
+    Return the student's files and folders that an import of a helper module would silently replace.
+
+    An identical copy isn't a clash, since instructors may give students one to work with.
+    """
+    clashes: list[str] = []
+    for name, source in (helper_modules or {}).items():
+        file_path = workspace_dir / f"{name}.py"
+        if (workspace_dir / name).is_dir():
+            clashes.append(f"{name}/")
+        elif file_path.is_file():
+            try:
+                is_copy = file_path.read_text(encoding="utf-8") == source
+            except (OSError, UnicodeDecodeError):
+                is_copy = False
+            if not is_copy:
+                clashes.append(file_path.name)
+    return clashes
+
+
 def _initialize_sandbox_fixture(
     request: pytest.FixtureRequest,
     data_json: dict[str, Any] | None,
@@ -537,6 +558,16 @@ def _initialize_workspace_fixture(
     data_dir = get_datadir(request.module)
     setup_code_file = (data_dir / "setup_code.py") if data_dir is not None else Path("setup_code.py")
 
+    helper_modules = _load_helper_modules(request, helper_module_names, import_blacklist)
+    clashes = _find_helper_name_clashes(workspace_dir, helper_modules)
+    if clashes:
+        # On one line, because the default output level only shows the first line of a failure.
+        pytest.fail(
+            f"These names are reserved for modules that this question provides: {', '.join(clashes)}. "
+            "Rename yours and update any imports that use them.",
+            pytrace=False,
+        )
+
     fixture = WorkspaceFixture(
         workspace_dir=workspace_dir,
         setup_code_file=setup_code_file,
@@ -547,7 +578,7 @@ def _initialize_workspace_fixture(
         names_for_user_list=names_for_user_list,
         worker_username=request.config.getoption("--worker-username"),
         exec_entry=exec_entry,
-        helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
+        helper_modules=helper_modules,
     )
     return fixture, initialization_timeout
 

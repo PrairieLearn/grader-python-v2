@@ -1,4 +1,4 @@
-"""Helper modules in workspace mode, including a student file with the same name as one."""
+"""Helper modules in workspace mode, including a student's identical copy of one."""
 
 import pytest
 
@@ -32,8 +32,8 @@ def test_student_module(workspace_sandbox: WorkspaceFixture) -> None:
     assert workspace_sandbox.query_function("calculator.add_one", 2) == 3
 
 
-@pytest.mark.grading_data(name="helper module beats student file", points=1)
-def test_student_file_with_same_name(workspace_sandbox: WorkspaceFixture) -> None:
+@pytest.mark.grading_data(name="identical copy of a helper module", points=1)
+def test_identical_copy(workspace_sandbox: WorkspaceFixture) -> None:
     assert workspace_sandbox.query_function("calculator.source") == "instructor"
 
 
@@ -58,5 +58,4 @@ def test_whitelist(workspace_sandbox: WorkspaceFixture) -> None:
 
 @pytest.mark.grading_data(name="dotted queries search the student's project", points=1)
 def test_dotted_queries(workspace_sandbox: WorkspaceFixture) -> None:
-    assert workspace_sandbox.query("helper_function.SOURCE") == "student"
     assert workspace_sandbox.query_function_raw("second_helper.add_one", 1)["status"] != "success"

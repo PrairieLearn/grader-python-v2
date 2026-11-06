@@ -32,11 +32,11 @@
       {
         "max_points": 1,
         "message": "",
-        "name": "helper module beats student file",
+        "name": "identical copy of a helper module",
         "outcome": "passed",
         "points": 1.0,
         "points_frac": 1.0,
-        "test_id": "test_helper_modules_workspace.py::test_student_file_with_same_name"
+        "test_id": "test_helper_modules_workspace.py::test_identical_copy"
       },
       {
         "max_points": 1,

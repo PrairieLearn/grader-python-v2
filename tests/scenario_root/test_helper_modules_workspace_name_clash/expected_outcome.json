@@ -1,0 +1,16 @@
+{
+  "expected_data_object": {
+    "score": 0.0,
+    "tests": [
+      {
+        "test_id": "test_helper_modules_workspace_name_clash.py::test_query",
+        "outcome": "error",
+        "message": "These names are reserved for modules that this question provides: helper_function.py.",
+        "max_points": 1,
+        "points": 0.0,
+        "points_frac": 0.0,
+        "name": "query"
+      }
+    ]
+  }
+}

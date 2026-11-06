@@ -380,10 +380,13 @@ import helper_function as hf
   message says what's wrong.
 - **Fixtures:** it works with `sandbox` and `module_sandbox`, for `.py` and `.ipynb` submissions, and
   with `workspace_sandbox`.
-- **Workspace mode:** an `import` of a listed module gets the instructor's file, even if the student
-  submits one with the same name, and it keeps the restricted builtins that the student's own modules
-  don't have. Dotted queries such as `query_function("helper_function.triple")` only search the
-  student's project, so they won't call a helper module.
+- **Workspace mode:** students can have several files that import each other, so a listed name is
+  reserved. If a student submits a different `helper_function.py` or a `helper_function/` folder, the
+  submission fails with a message asking them to rename it and counts as an attempt. An identical copy
+  is fine, so you can give students one to work with. A listed module keeps the restricted builtins
+  that the student's own modules don't have. Dotted queries such as
+  `query_function("helper_function.triple")` only search the student's project, so they won't call a
+  helper module.
 
 > **Warning:** Students can read everything in a helper module, so it must not contain answers. This
 > setting also doesn't make the rest of the tests folder private. `importlib` isn't blacklisted by
