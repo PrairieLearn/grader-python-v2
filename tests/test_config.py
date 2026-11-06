@@ -266,3 +266,44 @@ def test_summary_scores_use_test_point_values() -> None:
     )
 
     assert (total_score, max_score) == (6.0, 6)
+
+
+# ---------------------------------------------------------------------------
+# helper_modules field
+# ---------------------------------------------------------------------------
+
+
+def test_helper_modules_default_is_none() -> None:
+    assert ConfigObject().helper_modules is None
+
+
+def test_helper_modules_valid() -> None:
+    assert ConfigObject(helper_modules=["helper_function", "_private2"]).helper_modules == ["helper_function", "_private2"]
+
+
+def test_helper_modules_not_in_params() -> None:
+    assert "helper_modules" not in ConfigObject(helper_modules=["helper_function"]).to_dict()
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["", " ", "..", "../ans", "a/b", "a\\b", "pkg.mod", "helper.py", "/grade/tests/ans", "1abc", "has space", "class", 5, None],
+)
+def test_helper_modules_rejects_invalid_names(name: object) -> None:
+    with pytest.raises(ValueError, match="helper_modules must contain plain module names"):
+        ConfigObject(helper_modules=[name])  # type: ignore[list-item]
+
+
+def test_helper_modules_must_be_a_list() -> None:
+    with pytest.raises(TypeError, match="helper_modules must be a list"):
+        ConfigObject(helper_modules="helper_function")  # type: ignore[arg-type]
+
+
+def test_helper_modules_cannot_be_empty() -> None:
+    with pytest.raises(ValueError, match="helper_modules cannot be empty"):
+        ConfigObject(helper_modules=[])
+
+
+def test_helper_modules_not_supported_in_workspace_mode() -> None:
+    with pytest.raises(ValueError, match="not supported in workspace mode"):
+        ConfigObject(workspace_mode=True, helper_modules=["helper_function"])

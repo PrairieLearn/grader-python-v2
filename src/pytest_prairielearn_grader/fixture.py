@@ -355,6 +355,7 @@ class StudentFixture(_SandboxBase):
         names_for_user_list: list[str] | None,
         worker_username: str | None,
         notebook_cell_tag: str | None = None,
+        helper_modules: dict[str, str] | None = None,
     ) -> None:
         super().__init__(import_whitelist, import_blacklist, starting_vars, builtin_whitelist, names_for_user_list, worker_username)
         self.leading_file = file_names.leading_file
@@ -362,6 +363,7 @@ class StudentFixture(_SandboxBase):
         self.student_code_file = file_names.student_code_file
         self.setup_code_file = file_names.setup_code_file
         self.notebook_cell_tag = notebook_cell_tag
+        self.helper_modules = helper_modules
 
     def start_student_code_server(self, *, initialization_timeout: float = DEFAULT_TIMEOUT) -> ProcessStartResponse:
         if self.worker_username is not None:
@@ -402,6 +404,7 @@ class StudentFixture(_SandboxBase):
             starting_vars=self.starting_vars,
             builtin_whitelist=self.builtin_whitelist,
             names_for_user_list=self.names_for_user_list,
+            helper_modules=self.helper_modules,
         )
         self._send_json_object(json_message)
         return self._read_start_response()

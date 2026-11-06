@@ -99,6 +99,38 @@ def data_json(request: pytest.FixtureRequest) -> dict[str, Any] | None:
     #     raise ValueError(f"Data file '{data_file.name}' not found in '{datadir}'.")
 
 
+def _load_helper_modules(
+    request: pytest.FixtureRequest,
+    names: list[str] | None,
+    import_blacklist: list[str] | None,
+) -> dict[str, str] | None:
+    """
+    Read the source of each module named by the helper_modules setting.
+
+    A problem with these files is the instructor's to fix, so it makes the submission ungradable
+    instead of costing the student an attempt.
+    """
+    if names is None:
+        return None
+
+    data_dir = get_datadir(request.module)
+    sources: dict[str, str] = {}
+    for name in names:
+        path = None if data_dir is None else data_dir / f"{name}.py"
+        try:
+            if import_blacklist is not None and name in import_blacklist:
+                raise ValueError("it's also in import_blacklist, so it can't be imported")
+            if path is None or not path.is_file():
+                raise FileNotFoundError(f"{path} doesn't exist")
+            sources[name] = path.read_text(encoding="utf-8")
+            compile(sources[name], f"{name}.py", "exec")
+        except (OSError, ValueError, SyntaxError) as e:
+            message = f"Autograder configuration error in helper_modules: can't use '{name}': {e}"
+            request.config.result_collector_plugin.collection_errors.append(message)  # type: ignore[attr-defined]
+            pytest.fail(message, pytrace=False)
+    return sources
+
+
 def _initialize_sandbox_fixture(
     request: pytest.FixtureRequest,
     data_json: dict[str, Any] | None,
@@ -127,6 +159,7 @@ def _initialize_sandbox_fixture(
     # Check for module-level ConfigObject that overrides all other configuration
     config_dict: dict[str, Any] = {}
     notebook_cell_tag: str | None = None
+    helper_module_names: list[str] | None = None
     if hasattr(request, "module") and hasattr(request.module, "autograder_config"):
         config_object = request.module.autograder_config
         if not isinstance(config_object, ConfigObject):
@@ -137,6 +170,7 @@ def _initialize_sandbox_fixture(
         initialization_timeout = config_object.sandbox_timeout
         config_starting_vars = config_object.starting_vars
         notebook_cell_tag = config_object.notebook_cell_tag
+        helper_module_names = config_object.helper_modules
     else:
         # Check for module-level timeout variable (works for module-scoped fixtures)
         # This allows setting: sandbox_timeout = 0.5 at module level
@@ -198,6 +232,7 @@ def _initialize_sandbox_fixture(
         names_for_user_list=names_for_user_list,
         worker_username=request.config.getoption("--worker-username"),
         notebook_cell_tag=notebook_cell_tag,
+        helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
     )
 
     return fixture, initialization_timeout
