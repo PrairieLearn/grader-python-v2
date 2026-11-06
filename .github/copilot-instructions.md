@@ -143,7 +143,8 @@ result = sandbox.query_function("student_func", arg1, arg2, timeout=5)
 
 `ConfigObject(helper_modules=["helper_function"])` lets setup, leading and student code import
 `helper_function.py` from the tests folder, which isn't otherwise on the import path. Students can read
-these modules, so they must not contain answers. It isn't supported in workspace mode.
+these modules, so they must not contain answers. In workspace mode, they take priority over student files
+with the same name when imported.
 
 ### 5. Serialization
 

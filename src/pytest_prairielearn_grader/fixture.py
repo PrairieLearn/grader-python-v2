@@ -465,11 +465,13 @@ class WorkspaceFixture(_SandboxBase):
         names_for_user_list: list[str] | None,
         worker_username: str | None,
         exec_entry: str | None = None,
+        helper_modules: dict[str, str] | None = None,
     ) -> None:
         super().__init__(import_whitelist, import_blacklist, starting_vars, builtin_whitelist, names_for_user_list, worker_username)
         self.workspace_dir = workspace_dir
         self.setup_code_file = setup_code_file
         self.exec_entry = exec_entry
+        self.helper_modules = helper_modules
 
     def start_workspace_server(self, *, initialization_timeout: float = DEFAULT_TIMEOUT) -> ProcessStartResponse:
         """Start the sandbox subprocess and initialise the workspace."""
@@ -492,6 +494,7 @@ class WorkspaceFixture(_SandboxBase):
             starting_vars=self.starting_vars,
             builtin_whitelist=self.builtin_whitelist,
             names_for_user_list=self.names_for_user_list,
+            helper_modules=self.helper_modules,
         )
         self._send_json_object(json_message)
         return self._read_start_response()

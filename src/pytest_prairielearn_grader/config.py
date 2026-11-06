@@ -77,8 +77,10 @@ class ConfigObject:
     also blocks is a configuration error. A helper module runs in the sandbox with the same
     builtins and import rules as student code.
 
+    In workspace mode, a helper module takes priority over a student file with the same name
+    when imported, and it keeps these restricted builtins, unlike the student's own modules.
+
     Students can read everything in a helper module, so it must not contain answers.
-    Not supported in workspace mode, where the student's folder is on the import path.
 
     Example: ["helper_function"]
     """
@@ -259,11 +261,6 @@ class ConfigObject:
             for module_name in self.helper_modules:
                 if not isinstance(module_name, str) or not module_name.isidentifier() or keyword.iskeyword(module_name):
                     raise ValueError(f"helper_modules must contain plain module names without dots, paths or '.py', got: {module_name!r}")
-            if self.workspace_mode:
-                raise ValueError(
-                    "helper_modules is not supported in workspace mode, where modules in the student's folder can already be imported. "
-                    "Set workspace_mode=False or remove helper_modules."
-                )
 
         # Validate builtin_whitelist contains non-empty strings
         if self.builtin_whitelist is not None:

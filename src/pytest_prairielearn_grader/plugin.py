@@ -492,6 +492,7 @@ def _initialize_workspace_fixture(
 
     config_dict: dict[str, Any] = {}
     exec_entry: str | None = None
+    helper_module_names: list[str] | None = None
     if hasattr(request, "module") and hasattr(request.module, "autograder_config"):
         config_object = request.module.autograder_config
         if not isinstance(config_object, ConfigObject):
@@ -500,6 +501,7 @@ def _initialize_workspace_fixture(
         initialization_timeout = config_object.sandbox_timeout
         config_starting_vars = config_object.starting_vars
         exec_entry = config_object.workspace_exec_entry
+        helper_module_names = config_object.helper_modules
     else:
         if hasattr(request, "module") and hasattr(request.module, "sandbox_timeout"):
             initialization_timeout = request.module.sandbox_timeout
@@ -545,6 +547,7 @@ def _initialize_workspace_fixture(
         names_for_user_list=names_for_user_list,
         worker_username=request.config.getoption("--worker-username"),
         exec_entry=exec_entry,
+        helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
     )
     return fixture, initialization_timeout
 

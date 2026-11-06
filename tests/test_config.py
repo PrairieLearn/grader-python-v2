@@ -304,6 +304,6 @@ def test_helper_modules_cannot_be_empty() -> None:
         ConfigObject(helper_modules=[])
 
 
-def test_helper_modules_not_supported_in_workspace_mode() -> None:
-    with pytest.raises(ValueError, match="not supported in workspace mode"):
-        ConfigObject(workspace_mode=True, helper_modules=["helper_function"])
+def test_helper_modules_in_workspace_mode() -> None:
+    config = ConfigObject(workspace_mode=True, helper_modules=["helper_function"])
+    assert config.helper_modules == ["helper_function"]

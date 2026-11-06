@@ -212,8 +212,8 @@ def get_custom_importer(
     each other without instructors needing to maintain a manual whitelist of their own files.
     Relative imports (level > 0) are always permitted for the same reason.
 
-    Modules in *helper_modules* can be imported without being on the whitelist, unless they're on
-    the blacklist.
+    Modules in *helper_modules* can be imported without being on the whitelist, and they take
+    priority over workspace files with the same name. The grader rejects any that are blacklisted.
     """
 
     original_import = _REAL_IMPORT
@@ -238,6 +238,9 @@ def get_custom_importer(
         if level > 0:
             return original_import(name, globals, locals, fl, level)
 
+        if helper_modules is not None and name in helper_modules:
+            return helper_modules.load(name)
+
         # Workspace-local modules are always importable regardless of whitelist/blacklist.
         # A module is considered local if its top-level package maps to a file or directory
         # directly inside workspace_dir.
@@ -249,8 +252,6 @@ def get_custom_importer(
         # Apply blacklist / whitelist to external imports.
         if import_blacklist is not None and name in import_blacklist:
             raise ImportError(f"Module '{name}' is blacklisted and cannot be imported.")
-        elif helper_modules is not None and name in helper_modules:
-            return helper_modules.load(name)
         elif (
             (import_whitelist is not None and name in import_whitelist)
             or name.startswith("_")  # Allow Python internal/private modules (_io, _abc, _collections, etc.)
@@ -376,6 +377,7 @@ async def workspace_runner(
     starting_vars: dict[str, Any] | None,
     builtin_whitelist: list[str] | None,
     names_for_user_list: list[str] | None,
+    helper_modules: dict[str, str] | None,
 ) -> tuple[dict[str, Any], dict[str, Any], ProcessStartResponse]:
     """
     Sets up a workspace sandbox by inserting workspace_dir at the front of sys.path
@@ -393,7 +395,12 @@ async def workspace_runner(
     student_code_vars: dict[str, Any] = {}
     student_code_vars["__builtins__"] = get_builtins(builtin_whitelist)
     student_code_vars["__builtins__"]["__name__"] = "__main__"
-    workspace_importer = get_custom_importer(import_whitelist, import_blacklist, workspace_dir)
+    workspace_importer = get_custom_importer(
+        import_whitelist,
+        import_blacklist,
+        workspace_dir,
+        helper_modules=None if helper_modules is None else _HelperModules(helper_modules, student_code_vars["__builtins__"]),
+    )
     student_code_vars["__builtins__"]["__import__"] = workspace_importer
     # Patch the real builtins.__import__ so that workspace modules loaded via
     # importlib.import_module() (which use the real builtins, not student_code_vars)
@@ -521,6 +528,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     starting_vars=ws_json_message["starting_vars"],
                     builtin_whitelist=ws_json_message["builtin_whitelist"],
                     names_for_user_list=ws_json_message["names_for_user_list"],
+                    helper_modules=ws_json_message["helper_modules"],
                 )
 
                 writer.write((json.dumps(start_response) + os.linesep).encode())

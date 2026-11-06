@@ -378,8 +378,12 @@ import helper_function as hf
 - **Configuration errors:** if a listed file is missing or has a syntax error, or the module is
   blacklisted, the submission is ungradable. The students don't lose an attempt, and each test's
   message says what's wrong.
-- **Fixtures:** it works with `sandbox` and `module_sandbox`, for `.py` and `.ipynb` submissions. It
-  isn't supported in workspace mode, where modules in the student's folder can already be imported.
+- **Fixtures:** it works with `sandbox` and `module_sandbox`, for `.py` and `.ipynb` submissions, and
+  with `workspace_sandbox`.
+- **Workspace mode:** an `import` of a listed module gets the instructor's file, even if the student
+  submits one with the same name, and it keeps the restricted builtins that the student's own modules
+  don't have. Dotted queries such as `query_function("helper_function.triple")` only search the
+  student's project, so they won't call a helper module.
 
 > **Warning:** Students can read everything in a helper module, so it must not contain answers. This
 > setting also doesn't make the rest of the tests folder private. `importlib` isn't blacklisted by
@@ -1505,6 +1509,7 @@ goes through the import machinery.
 | `sandbox_timeout`       | `float`             | `1.0`        | Timeout for sandbox startup (increase for larger projects).                                                   |
 | `import_whitelist`      | `list[str] \| None` | `None`       | Allowed imports. `None` = allow all.                                                                          |
 | `import_blacklist`      | `list[str] \| None` | default list | Blocked imports.                                                                                              |
+| `helper_modules`        | `list[str] \| None` | `None`       | Modules from the tests folder to make importable. See [Helper Modules](#helper-modules).                      |
 
 ### Production vs. Local Development
 
