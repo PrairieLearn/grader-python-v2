@@ -1,0 +1,83 @@
+{
+  "expected_data_object": {
+    "score": 1.0,
+    "tests": [
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "setup code",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules_workspace.py::test_setup_code"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "entry point",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules_workspace.py::test_entry_point"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "student module",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules_workspace.py::test_student_module"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "identical copy of a helper module",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules_workspace.py::test_identical_copy"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "builtins",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules_workspace.py::test_builtins"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "unnamed file",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules_workspace.py::test_unnamed_file"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "whitelist",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules_workspace.py::test_whitelist"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "dotted queries search the student's project",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules_workspace.py::test_dotted_queries"
+      }
+    ]
+  },
+  "expected_outcome": {
+    "passed": 8,
+    "failed": 0
+  }
+}

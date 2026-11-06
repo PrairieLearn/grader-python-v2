@@ -161,10 +161,47 @@ async def student_function_runner(
         return json.dumps(not_serializable_response)
 
 
+class _HelperModules:
+    """
+    Loads the modules named by the helper_modules setting from the source sent by the grader.
+
+    They're kept out of sys.modules so that only the sandbox's importer can find them, and they
+    run with the given builtins, so importing one doesn't give student code any wider access.
+    """
+
+    def __init__(self, sources: dict[str, str], module_builtins: dict[str, Any]) -> None:
+        self._sources = sources
+        self._module_builtins = module_builtins
+        self._loaded: dict[str, types.ModuleType] = {}
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._sources
+
+    def load(self, name: str) -> types.ModuleType:
+        if name in self._loaded:
+            return self._loaded[name]
+
+        source = self._sources[name]
+        file_name = f"{name}.py"
+        populate_linecache(source, file_name)
+
+        module = types.ModuleType(name)
+        module.__dict__["__builtins__"] = self._module_builtins
+        # Add it before running it so that helper modules can import each other, as in sys.modules.
+        self._loaded[name] = module
+        try:
+            exec(compile(source, file_name, "exec"), module.__dict__)
+        except Exception as e:
+            del self._loaded[name]
+            raise ImportError(f"Helper module '{name}' could not be loaded: {type(e).__name__}: {e}") from e
+        return module
+
+
 def get_custom_importer(
     import_whitelist: list[str] | None,
     import_blacklist: list[str] | None,
     workspace_dir: str | None = None,
+    helper_modules: _HelperModules | None = None,
 ) -> ImportFunction:
     """
     Returns a custom import function that restricts imports based on the provided whitelist and
@@ -174,6 +211,9 @@ def get_custom_importer(
     directory inside that directory is unconditionally allowed, so that student modules can import
     each other without instructors needing to maintain a manual whitelist of their own files.
     Relative imports (level > 0) are always permitted for the same reason.
+
+    Modules in *helper_modules* can be imported without being on the whitelist, and they take
+    priority over workspace files with the same name. The grader rejects any that are blacklisted.
     """
 
     original_import = _REAL_IMPORT
@@ -197,6 +237,9 @@ def get_custom_importer(
         # Relative imports are always intra-package and allowed.
         if level > 0:
             return original_import(name, globals, locals, fl, level)
+
+        if helper_modules is not None and name in helper_modules:
+            return helper_modules.load(name)
 
         # Workspace-local modules are always importable regardless of whitelist/blacklist.
         # A module is considered local if its top-level package maps to a file or directory
@@ -232,6 +275,7 @@ async def student_code_runner(
     starting_vars: dict[str, Any] | None,
     builtin_whitelist: list[str] | None,
     names_for_user_list: list[str] | None,
+    helper_modules: dict[str, str] | None,
 ) -> tuple[dict[str, Any], dict[str, Any], ProcessStartResponse]:
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
@@ -244,7 +288,11 @@ async def student_code_runner(
     student_code_vars["__builtins__"] = get_builtins(builtin_whitelist)
 
     student_code_vars["__builtins__"]["__name__"] = "__main__"  # Set __name__ to "__main__" to mimic the main module
-    student_code_vars["__builtins__"]["__import__"] = get_custom_importer(import_whitelist, import_blacklist)
+    student_code_vars["__builtins__"]["__import__"] = get_custom_importer(
+        import_whitelist,
+        import_blacklist,
+        helper_modules=None if helper_modules is None else _HelperModules(helper_modules, student_code_vars["__builtins__"]),
+    )
 
     try:
         # First, execute the setup code if provided
@@ -329,6 +377,7 @@ async def workspace_runner(
     starting_vars: dict[str, Any] | None,
     builtin_whitelist: list[str] | None,
     names_for_user_list: list[str] | None,
+    helper_modules: dict[str, str] | None,
 ) -> tuple[dict[str, Any], dict[str, Any], ProcessStartResponse]:
     """
     Sets up a workspace sandbox by inserting workspace_dir at the front of sys.path
@@ -346,7 +395,12 @@ async def workspace_runner(
     student_code_vars: dict[str, Any] = {}
     student_code_vars["__builtins__"] = get_builtins(builtin_whitelist)
     student_code_vars["__builtins__"]["__name__"] = "__main__"
-    workspace_importer = get_custom_importer(import_whitelist, import_blacklist, workspace_dir)
+    workspace_importer = get_custom_importer(
+        import_whitelist,
+        import_blacklist,
+        workspace_dir,
+        helper_modules=None if helper_modules is None else _HelperModules(helper_modules, student_code_vars["__builtins__"]),
+    )
     student_code_vars["__builtins__"]["__import__"] = workspace_importer
     # Patch the real builtins.__import__ so that workspace modules loaded via
     # importlib.import_module() (which use the real builtins, not student_code_vars)
@@ -474,6 +528,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     starting_vars=ws_json_message["starting_vars"],
                     builtin_whitelist=ws_json_message["builtin_whitelist"],
                     names_for_user_list=ws_json_message["names_for_user_list"],
+                    helper_modules=ws_json_message["helper_modules"],
                 )
 
                 writer.write((json.dumps(start_response) + os.linesep).encode())
@@ -504,6 +559,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     starting_vars=starting_vars,
                     builtin_whitelist=builtin_whitelist,
                     names_for_user_list=names_for_user_list,
+                    helper_modules=start_json_message["helper_modules"],
                 )
 
                 writer.write((json.dumps(start_response) + os.linesep).encode())

@@ -99,6 +99,59 @@ def data_json(request: pytest.FixtureRequest) -> dict[str, Any] | None:
     #     raise ValueError(f"Data file '{data_file.name}' not found in '{datadir}'.")
 
 
+def _load_helper_modules(
+    request: pytest.FixtureRequest,
+    names: list[str] | None,
+    import_blacklist: list[str] | None,
+) -> dict[str, str] | None:
+    """
+    Read the source of each module named by the helper_modules setting.
+
+    A problem with these files is the instructor's to fix, so it makes the submission ungradable
+    instead of costing the student an attempt.
+    """
+    if names is None:
+        return None
+
+    data_dir = get_datadir(request.module)
+    sources: dict[str, str] = {}
+    for name in names:
+        path = None if data_dir is None else data_dir / f"{name}.py"
+        try:
+            if import_blacklist is not None and name in import_blacklist:
+                raise ValueError("it's also in import_blacklist, so it can't be imported")
+            if path is None or not path.is_file():
+                raise FileNotFoundError(f"{path} doesn't exist")
+            sources[name] = path.read_text(encoding="utf-8")
+            compile(sources[name], f"{name}.py", "exec")
+        except (OSError, ValueError, SyntaxError) as e:
+            message = f"Autograder configuration error in helper_modules: can't use '{name}': {e}"
+            request.config.result_collector_plugin.collection_errors.append(message)  # type: ignore[attr-defined]
+            pytest.fail(message, pytrace=False)
+    return sources
+
+
+def _find_helper_name_clashes(workspace_dir: Path, helper_modules: dict[str, str] | None) -> list[str]:
+    """
+    Return the student's files and folders that an import of a helper module would silently replace.
+
+    An identical copy isn't a clash, since instructors may give students one to work with.
+    """
+    clashes: list[str] = []
+    for name, source in (helper_modules or {}).items():
+        file_path = workspace_dir / f"{name}.py"
+        if (workspace_dir / name).is_dir():
+            clashes.append(f"{name}/")
+        elif file_path.is_file():
+            try:
+                is_copy = file_path.read_text(encoding="utf-8") == source
+            except (OSError, UnicodeDecodeError):
+                is_copy = False
+            if not is_copy:
+                clashes.append(file_path.name)
+    return clashes
+
+
 def _initialize_sandbox_fixture(
     request: pytest.FixtureRequest,
     data_json: dict[str, Any] | None,
@@ -127,6 +180,7 @@ def _initialize_sandbox_fixture(
     # Check for module-level ConfigObject that overrides all other configuration
     config_dict: dict[str, Any] = {}
     notebook_cell_tag: str | None = None
+    helper_module_names: list[str] | None = None
     if hasattr(request, "module") and hasattr(request.module, "autograder_config"):
         config_object = request.module.autograder_config
         if not isinstance(config_object, ConfigObject):
@@ -137,6 +191,7 @@ def _initialize_sandbox_fixture(
         initialization_timeout = config_object.sandbox_timeout
         config_starting_vars = config_object.starting_vars
         notebook_cell_tag = config_object.notebook_cell_tag
+        helper_module_names = config_object.helper_modules
     else:
         # Check for module-level timeout variable (works for module-scoped fixtures)
         # This allows setting: sandbox_timeout = 0.5 at module level
@@ -198,6 +253,7 @@ def _initialize_sandbox_fixture(
         names_for_user_list=names_for_user_list,
         worker_username=request.config.getoption("--worker-username"),
         notebook_cell_tag=notebook_cell_tag,
+        helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
     )
 
     return fixture, initialization_timeout
@@ -457,6 +513,7 @@ def _initialize_workspace_fixture(
 
     config_dict: dict[str, Any] = {}
     exec_entry: str | None = None
+    helper_module_names: list[str] | None = None
     if hasattr(request, "module") and hasattr(request.module, "autograder_config"):
         config_object = request.module.autograder_config
         if not isinstance(config_object, ConfigObject):
@@ -465,6 +522,7 @@ def _initialize_workspace_fixture(
         initialization_timeout = config_object.sandbox_timeout
         config_starting_vars = config_object.starting_vars
         exec_entry = config_object.workspace_exec_entry
+        helper_module_names = config_object.helper_modules
     else:
         if hasattr(request, "module") and hasattr(request.module, "sandbox_timeout"):
             initialization_timeout = request.module.sandbox_timeout
@@ -500,6 +558,16 @@ def _initialize_workspace_fixture(
     data_dir = get_datadir(request.module)
     setup_code_file = (data_dir / "setup_code.py") if data_dir is not None else Path("setup_code.py")
 
+    helper_modules = _load_helper_modules(request, helper_module_names, import_blacklist)
+    clashes = _find_helper_name_clashes(workspace_dir, helper_modules)
+    if clashes:
+        # On one line, because the default output level only shows the first line of a failure.
+        pytest.fail(
+            f"These names are reserved for modules that this question provides: {', '.join(clashes)}. "
+            "Rename yours and update any imports that use them.",
+            pytrace=False,
+        )
+
     fixture = WorkspaceFixture(
         workspace_dir=workspace_dir,
         setup_code_file=setup_code_file,
@@ -510,6 +578,7 @@ def _initialize_workspace_fixture(
         names_for_user_list=names_for_user_list,
         worker_username=request.config.getoption("--worker-username"),
         exec_entry=exec_entry,
+        helper_modules=helper_modules,
     )
     return fixture, initialization_timeout
 

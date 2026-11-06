@@ -143,6 +143,8 @@ def test_autograder_scenario_with_pytester(pytester: pytest.Pytester, scenario_d
                 assert test_id in test_results_obj, f"Test '{test_id}' not found in results."
                 actual_test = test_results_obj[test_id]
                 assert actual_test["outcome"] == expected_test["outcome"], f"Outcome mismatch for test '{test_id}'."
+                if "message" in expected_test:
+                    assert expected_test["message"] in actual_test["message"], f"Message mismatch for test '{test_id}'."
                 outcome_dict[CONVERSION_DICT[actual_test["outcome"]]] += 1
             result.assert_outcomes(**outcome_dict)
         return

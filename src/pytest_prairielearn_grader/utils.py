@@ -145,6 +145,7 @@ class ProcessStartRequest(TypedDict):
     starting_vars: dict[str, Any] | None
     builtin_whitelist: list[str] | None
     names_for_user_list: list[str] | None
+    helper_modules: dict[str, str] | None  # Module name to source code
 
 
 class WorkspaceStartRequest(TypedDict):
@@ -158,6 +159,7 @@ class WorkspaceStartRequest(TypedDict):
     starting_vars: dict[str, Any] | None
     builtin_whitelist: list[str] | None
     names_for_user_list: list[str] | None
+    helper_modules: dict[str, str] | None  # Module name to source code
 
 
 class ProcessStartResponse(TypedDict):
