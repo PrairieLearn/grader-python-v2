@@ -8,6 +8,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 from typing import NamedTuple
+from typing import NoReturn
 from typing import cast
 
 import _pytest
@@ -15,6 +16,7 @@ import _pytest.reports
 import _pytest.terminal
 import pytest
 from _pytest.config import Config
+from _pytest.outcomes import Failed
 from prettytable import PrettyTable
 
 from .config import ConfigObject
@@ -32,6 +34,20 @@ logger = logging.getLogger(__name__)
 # Default configuration constants
 DEFAULT_SANDBOX_TIMEOUT = 1.0
 DEFAULT_IMPORT_BLACKLIST = ["os", "sys", "subprocess", "pathlib", "shutil"]
+
+
+class SandboxStartupFailed(Failed):
+    """
+    Raised when the student code sandbox fails to start (an exception, timeout or no response
+    while running student code at startup).
+
+    The message is already formatted for the test's output level, so the result collector
+    shows it to the student as it is instead of wrapping it in another exception header.
+    """
+
+
+def _fail_startup(message: str) -> NoReturn:
+    raise SandboxStartupFailed(message, pytrace=False)
 
 
 class TestResult(NamedTuple):
@@ -288,29 +304,33 @@ def _handle_sandbox_startup_errors(
         if exception_name == "SyntaxError":
             _record_syntax_error_as_ungradable(request, response)
 
+        exception_message = response.get("execution_message", "") or ""
+
         if output_level == GradingOutputLevel.Friendly:
-            exception_message = response.get("execution_message", "") or ""
-            pytest.fail(exception_message or str(exception_name), pytrace=False)
+            _fail_startup(exception_message or str(exception_name))
 
         fail_message = f"Student code execution failed with an exception: {exception_name}"
-        exception_message = response.get("execution_message", "") or ""
+
+        if output_level == GradingOutputLevel.ExceptionName:
+            _fail_startup(fail_message)
+
         fail_message += f"{os.linesep}Exception Message: {exception_message}"
 
         if output_level == GradingOutputLevel.ExceptionMessage:
-            pytest.fail(fail_message, pytrace=False)
+            _fail_startup(fail_message)
 
         assert output_level == GradingOutputLevel.FullTraceback
 
         if exception_traceback := response.get("execution_traceback", ""):
             fail_message += f"{os.linesep * 2}{exception_traceback}"
 
-        pytest.fail(fail_message, pytrace=False)
+        _fail_startup(fail_message)
 
     elif response_status == ProcessStatusCode.TIMEOUT:
-        pytest.fail("Student code initialization timed out", pytrace=False)
+        _fail_startup("Student code initialization timed out")
 
     elif response_status == ProcessStatusCode.NO_RESPONSE:
-        pytest.fail(f"No response from initialization with timeout {initialization_timeout}", pytrace=False)
+        _fail_startup(f"No response from initialization with timeout {initialization_timeout}")
 
     elif response_status != ProcessStatusCode.SUCCESS:
         logger.warning(f"Unexpected status in response from student code server: {response}")
@@ -985,7 +1005,12 @@ class ResultCollectorPlugin:
 
                 logger.debug(f"Grading output level set to: {output_level}")
 
-                if output_level == GradingOutputLevel.Friendly:
+                if isinstance(call.excinfo.value, SandboxStartupFailed):
+                    # The sandbox startup handler already formatted this message for the
+                    # output level, so show it in full without another exception header.
+                    feedback_obj.add_message(str(call.excinfo.value))
+
+                elif output_level == GradingOutputLevel.Friendly:
                     # Friendly mode: show only the exception message text with
                     # no exception class name, traceback, or "failed with" prefix.
                     exception_message = str(call.excinfo.value)

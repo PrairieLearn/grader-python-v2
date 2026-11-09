@@ -1502,6 +1502,25 @@ def test_global_state(workspace_sandbox: WorkspaceFixture) -> None:
 Without `workspace_exec_entry` (the default), no file is executed at startup and all access
 goes through the import machinery.
 
+### Student Files Named Like Loaded Modules
+
+The sandbox loads some modules for itself before any student or setup code runs, such as
+`random`, `json`, `types`, `typing`, `logging` and `math`. Python reuses a module that's already
+loaded, so a student file named `random.py` (or a folder named `json/`) at the top of the project
+would be silently ignored in favor of the standard library module.
+
+Instead, startup fails and every test is an error worth 0 points, with a message listing the files
+and asking the student to rename them:
+
+```text
+Student code execution failed with an exception: ImportError
+Exception Message: These names are already used by modules that the grader has loaded: json/, random.py. Rename yours and update any imports that use them.
+```
+
+Only top-level `.py` files and folders are checked, and only against modules the sandbox has
+actually loaded. A file such as `calendar.py` or `utils.py` that doesn't match a loaded module is
+imported normally. The list of loaded modules can change between Python versions.
+
 ### ConfigObject Settings for Workspaces
 
 | Parameter               | Type                | Default      | Description                                                                                                   |
