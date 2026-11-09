@@ -7,6 +7,12 @@ from typing import Any
 from typing import Literal
 
 
+def _is_plain_relative_path(name: str) -> bool:
+    """Whether name is a relative file path with no '..', '.', empty or backslash parts."""
+    # An empty part also rules out absolute paths, "a//b" and a trailing "/".
+    return bool(name.strip()) and "\\" not in name and all(part not in ("", ".", "..") for part in name.split("/"))
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ConfigObject:
     """
@@ -85,6 +91,24 @@ class ConfigObject:
     Students can read everything in a helper module, so it must not contain answers.
 
     Example: ["helper_function"]
+    """
+
+    data_files: list[str] | None = None
+    """Files from the tests folder that setup code, leading code and student code can read by relative path.
+
+    Each entry is a path relative to the folder that holds leading_code.py, such as
+    "pagerank_large.txt" or "data/points.csv". Absolute paths and ".." aren't accepted.
+
+    The sandbox starts in a fresh folder that holds a copy of each listed file at the same
+    relative path, so ``np.loadtxt("pagerank_large.txt")`` works as it does in a Jupyter
+    workspace. Student code can't change the copies, and changes to them couldn't reach the
+    originals anyway, which tests read through the ``tests_dir`` fixture. Without this setting
+    the sandbox's starting folder isn't changed.
+
+    A listed file that doesn't exist makes the submission ungradable, with a message for the
+    instructor. Students can read the listed files, so they must not contain answers.
+
+    Example: ["pagerank_large.txt"]
     """
 
     builtin_whitelist: list[str] | None = None
@@ -263,6 +287,18 @@ class ConfigObject:
             for module_name in self.helper_modules:
                 if not isinstance(module_name, str) or not module_name.isidentifier() or keyword.iskeyword(module_name):
                     raise ValueError(f"helper_modules must contain plain module names without dots, paths or '.py', got: {module_name!r}")
+
+        # Validate data_files contains relative paths that stay inside the tests folder
+        if self.data_files is not None:
+            if not isinstance(self.data_files, list):
+                raise TypeError(f"data_files must be a list, got {type(self.data_files).__name__}")
+            if not self.data_files:
+                raise ValueError("data_files cannot be empty (use None for no data files)")
+            for file_name in self.data_files:
+                if not isinstance(file_name, str) or not _is_plain_relative_path(file_name):
+                    raise ValueError(f"data_files must contain relative paths inside the tests folder, without '..', got: {file_name!r}")
+            if len(set(self.data_files)) != len(self.data_files):
+                raise ValueError(f"data_files lists the same file more than once: {self.data_files!r}")
 
         # Validate builtin_whitelist contains non-empty strings
         if self.builtin_whitelist is not None:

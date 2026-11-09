@@ -123,7 +123,7 @@ def test_with_output(sandbox: StudentFixture) -> None:
 
 ### Available Fixtures
 
-Three fixtures are provided by the `pytest-prairielearn-grader` package:
+These fixtures are provided by the `pytest-prairielearn-grader` package:
 
 1. **`sandbox: StudentFixture`**: Provides sandboxed access to student code. Use this to query variables
    and call functions from the student's submission.
@@ -136,6 +136,10 @@ Three fixtures are provided by the `pytest-prairielearn-grader` package:
 
 4. **`data_json: DataFixture`**: Provides access to parameters from PrairieLearn's `data.json` file
    (generated via `pl-external-grader-variables` and other elements).
+
+5. **`tests_dir: Path`**: The question's tests folder, which holds `leading_code.py` and any data files.
+   Use it to read instructor files in a test, for example `np.loadtxt(tests_dir / "pagerank_large.txt")`,
+   instead of building the path from `__file__`.
 
 For implementation details, see the [fixture source code](https://github.com/prairielearn/grader-python-v2/blob/main/src/pytest_prairielearn_grader/fixture.py).
 
@@ -349,6 +353,7 @@ All parameters are optional with sensible defaults:
 - **`import_blacklist`** (list[str] | None): Blocked import modules (blacklist mode)
 - **`builtin_whitelist`** (list[str] | None): Allowed builtin functions
 - **`helper_modules`** (list[str] | None): Modules from the tests folder that can be imported (see [Helper Modules](#helper-modules))
+- **`data_files`** (list[str] | None): Files from the tests folder that code in the sandbox can read by relative path (see [Data Files](#data-files))
 - **`names_for_user`** (list[str] | None): List of variable names to inject into student code
 - **`student_code_pattern`** (str, default="student_code\*.py"): Glob pattern for finding student files
 - **`starting_vars`** (dict[str, Any], default={}): Dictionary of variable values to provide for injection
@@ -392,6 +397,47 @@ import helper_function as hf
 > **Warning:** Students can read everything in a helper module, so it must not contain answers. This
 > setting also doesn't make the rest of the tests folder private. `importlib` isn't blacklisted by
 > default, so student code can load files in that folder by path.
+
+#### Data Files
+
+In a workspace, code such as `np.loadtxt("pagerank_large.txt")` reads a file next to the notebook. To
+make the same code work during grading, put the file in the tests folder and name it in `data_files`:
+
+```python
+# tests/test_student.py, with the data in tests/pagerank_large.txt
+autograder_config = ConfigObject(
+    data_files=["pagerank_large.txt"],
+    student_code_pattern="Markov-Chains-3.ipynb",
+    notebook_cell_tag="#grade",
+)
+
+
+def test_pagerank(sandbox: StudentFixture, tests_dir: Path) -> None:
+    edges = np.loadtxt(tests_dir / "pagerank_large.txt")  # the instructor's original
+    ...
+```
+
+```python
+# tests/leading_code.py, or the student's code
+edges = np.loadtxt("pagerank_large.txt")
+```
+
+- **Paths:** each entry is relative to the tests folder, such as `"pagerank_large.txt"` or
+  `"data/points.csv"`, and keeps that relative path in the sandbox. Absolute paths and `..` aren't
+  accepted.
+- **Starting folder:** the sandbox starts in a new folder that holds only copies of the listed files.
+  Without `data_files`, the starting folder isn't changed.
+- **Read-only copies:** the copies and their folder are read-only for student code, and a fresh copy is
+  made for each sandbox. Tests should read the originals through the `tests_dir` fixture.
+- **Reading, not importing:** the folder isn't on the import path, so a listed `.py` file can't be
+  imported. Use `helper_modules` for that.
+- **Configuration errors:** if a listed file is missing, the submission is ungradable. The students
+  don't lose an attempt, and each test's message says what's wrong.
+- **Fixtures:** it works with `sandbox` and `module_sandbox`, for `.py` and `.ipynb` submissions, and
+  with `workspace_sandbox`. In workspace mode, relative paths resolve against the data files' folder,
+  not the student's workspace folder.
+
+> **Warning:** Students can read the listed files, so they must not contain answers.
 
 **How variable injection works**:
 

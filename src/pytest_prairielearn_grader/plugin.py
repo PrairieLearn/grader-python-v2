@@ -145,6 +145,42 @@ def _load_helper_modules(
     return sources
 
 
+def _resolve_data_files(request: pytest.FixtureRequest, names: list[str] | None) -> dict[str, Path] | None:
+    """
+    Find each file named by the data_files setting in the tests folder.
+
+    A missing file is the instructor's to fix, so it makes the submission ungradable instead of
+    costing the student an attempt.
+    """
+    if names is None:
+        return None
+
+    data_dir = get_datadir(request.module)
+    paths: dict[str, Path] = {}
+    for name in names:
+        path = None if data_dir is None else data_dir / name
+        if path is None or not path.is_file():
+            message = f"Autograder configuration error in data_files: can't use '{name}': {path} doesn't exist"
+            request.config.result_collector_plugin.collection_errors.append(message)  # type: ignore[attr-defined]
+            raise SandboxStartupFailed(message)
+        paths[name] = path
+    return paths
+
+
+@pytest.fixture(scope="module")
+def tests_dir(request: pytest.FixtureRequest) -> Path:
+    """
+    The question's tests folder, which holds leading_code.py, helper modules and data files.
+
+    Tests can read instructor files from it, for example to compute expected values from the
+    same data file that data_files gives the student: ``np.loadtxt(tests_dir / "data.txt")``.
+    """
+    data_dir = get_datadir(request.module)
+    if data_dir is None:
+        pytest.fail("tests_dir: the test module has no file, so its tests folder can't be found", pytrace=False)
+    return data_dir
+
+
 def _initialize_sandbox_fixture(
     request: pytest.FixtureRequest,
     data_json: dict[str, Any] | None,
@@ -174,6 +210,7 @@ def _initialize_sandbox_fixture(
     config_dict: dict[str, Any] = {}
     notebook_cell_tag: str | None = None
     helper_module_names: list[str] | None = None
+    data_file_names: list[str] | None = None
     if hasattr(request, "module") and hasattr(request.module, "autograder_config"):
         config_object = request.module.autograder_config
         if not isinstance(config_object, ConfigObject):
@@ -185,6 +222,7 @@ def _initialize_sandbox_fixture(
         config_starting_vars = config_object.starting_vars
         notebook_cell_tag = config_object.notebook_cell_tag
         helper_module_names = config_object.helper_modules
+        data_file_names = config_object.data_files
     else:
         # Check for module-level timeout variable (works for module-scoped fixtures)
         # This allows setting: sandbox_timeout = 0.5 at module level
@@ -247,6 +285,7 @@ def _initialize_sandbox_fixture(
         worker_username=request.config.getoption("--worker-username"),
         notebook_cell_tag=notebook_cell_tag,
         helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
+        data_files=_resolve_data_files(request, data_file_names),
     )
 
     return fixture, initialization_timeout
@@ -511,6 +550,7 @@ def _initialize_workspace_fixture(
     config_dict: dict[str, Any] = {}
     exec_entry: str | None = None
     helper_module_names: list[str] | None = None
+    data_file_names: list[str] | None = None
     if hasattr(request, "module") and hasattr(request.module, "autograder_config"):
         config_object = request.module.autograder_config
         if not isinstance(config_object, ConfigObject):
@@ -520,6 +560,7 @@ def _initialize_workspace_fixture(
         config_starting_vars = config_object.starting_vars
         exec_entry = config_object.workspace_exec_entry
         helper_module_names = config_object.helper_modules
+        data_file_names = config_object.data_files
     else:
         if hasattr(request, "module") and hasattr(request.module, "sandbox_timeout"):
             initialization_timeout = request.module.sandbox_timeout
@@ -566,6 +607,7 @@ def _initialize_workspace_fixture(
         worker_username=request.config.getoption("--worker-username"),
         exec_entry=exec_entry,
         helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
+        data_files=_resolve_data_files(request, data_file_names),
     )
     return fixture, initialization_timeout
 
