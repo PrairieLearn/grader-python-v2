@@ -1,0 +1,31 @@
+{
+  "expected_data_object": {
+    "score": 0.0,
+    "tests": [
+      {
+        "test_id": "test_startup_exception_message.py::test_default_level[student_code]",
+        "message": "Student code execution failed with an exception: ValueError\nException Message: first line of the reason\nsecond line of the reason",
+        "outcome": "error",
+        "max_points": 1,
+        "points": 0.0,
+        "points_frac": 0.0
+      },
+      {
+        "test_id": "test_startup_exception_message.py::test_name_level[student_code]",
+        "message": "Student code execution failed with an exception: ValueError",
+        "outcome": "error",
+        "max_points": 1,
+        "points": 0.0,
+        "points_frac": 0.0
+      },
+      {
+        "test_id": "test_startup_exception_message.py::test_traceback_level[student_code]",
+        "message": "Student code execution failed with an exception: ValueError\nException Message: first line of the reason\nsecond line of the reason\n\nTraceback (most recent call last):",
+        "outcome": "error",
+        "max_points": 1,
+        "points": 0.0,
+        "points_frac": 0.0
+      }
+    ]
+  }
+}

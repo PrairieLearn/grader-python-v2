@@ -5,7 +5,7 @@
       {
         "test_id": "test_helper_modules_workspace_name_clash.py::test_query",
         "outcome": "error",
-        "message": "These names are reserved for modules that this question provides: helper_function.py.",
+        "message": "Student code execution failed with an exception: ImportError\nException Message: These names are reserved for modules that this question provides: helper_function.py. These names are already used by modules that the grader has loaded: random.py. Rename yours and update any imports that use them.",
         "max_points": 1,
         "points": 0.0,
         "points_frac": 0.0,

@@ -15,6 +15,7 @@ import _pytest.reports
 import _pytest.terminal
 import pytest
 from _pytest.config import Config
+from _pytest.outcomes import Failed
 from prettytable import PrettyTable
 
 from .config import ConfigObject
@@ -32,6 +33,19 @@ logger = logging.getLogger(__name__)
 # Default configuration constants
 DEFAULT_SANDBOX_TIMEOUT = 1.0
 DEFAULT_IMPORT_BLACKLIST = ["os", "sys", "subprocess", "pathlib", "shutil"]
+
+
+class SandboxStartupFailed(Failed):
+    """
+    Raised when the student code sandbox fails to start (an exception, timeout or no response
+    while running student code at startup).
+
+    The message is already formatted for the test's output level, so the result collector
+    shows it to the student as it is instead of wrapping it in another exception header.
+    """
+
+    def __init__(self, msg: str | None = None, pytrace: bool = False) -> None:
+        super().__init__(msg, pytrace)
 
 
 class TestResult(NamedTuple):
@@ -127,19 +141,8 @@ def _load_helper_modules(
         except (OSError, ValueError, SyntaxError) as e:
             message = f"Autograder configuration error in helper_modules: can't use '{name}': {e}"
             request.config.result_collector_plugin.collection_errors.append(message)  # type: ignore[attr-defined]
-            pytest.fail(message, pytrace=False)
+            raise SandboxStartupFailed(message) from e
     return sources
-
-
-def _find_helper_name_clashes(workspace_dir: Path, helper_modules: dict[str, str] | None) -> list[str]:
-    """Return the student's files and folders that an import of a helper module would silently replace."""
-    clashes: list[str] = []
-    for name in helper_modules or {}:
-        if (workspace_dir / name).is_dir():
-            clashes.append(f"{name}/")
-        elif (workspace_dir / f"{name}.py").is_file():
-            clashes.append(f"{name}.py")
-    return clashes
 
 
 def _initialize_sandbox_fixture(
@@ -288,29 +291,33 @@ def _handle_sandbox_startup_errors(
         if exception_name == "SyntaxError":
             _record_syntax_error_as_ungradable(request, response)
 
+        exception_message = response.get("execution_message", "") or ""
+
         if output_level == GradingOutputLevel.Friendly:
-            exception_message = response.get("execution_message", "") or ""
-            pytest.fail(exception_message or str(exception_name), pytrace=False)
+            raise SandboxStartupFailed(exception_message or str(exception_name))
 
         fail_message = f"Student code execution failed with an exception: {exception_name}"
-        exception_message = response.get("execution_message", "") or ""
+
+        if output_level == GradingOutputLevel.ExceptionName:
+            raise SandboxStartupFailed(fail_message)
+
         fail_message += f"{os.linesep}Exception Message: {exception_message}"
 
         if output_level == GradingOutputLevel.ExceptionMessage:
-            pytest.fail(fail_message, pytrace=False)
+            raise SandboxStartupFailed(fail_message)
 
         assert output_level == GradingOutputLevel.FullTraceback
 
         if exception_traceback := response.get("execution_traceback", ""):
             fail_message += f"{os.linesep * 2}{exception_traceback}"
 
-        pytest.fail(fail_message, pytrace=False)
+        raise SandboxStartupFailed(fail_message)
 
     elif response_status == ProcessStatusCode.TIMEOUT:
-        pytest.fail("Student code initialization timed out", pytrace=False)
+        raise SandboxStartupFailed("Student code initialization timed out")
 
     elif response_status == ProcessStatusCode.NO_RESPONSE:
-        pytest.fail(f"No response from initialization with timeout {initialization_timeout}", pytrace=False)
+        raise SandboxStartupFailed(f"No response from initialization with timeout {initialization_timeout}")
 
     elif response_status != ProcessStatusCode.SUCCESS:
         logger.warning(f"Unexpected status in response from student code server: {response}")
@@ -548,16 +555,6 @@ def _initialize_workspace_fixture(
     data_dir = get_datadir(request.module)
     setup_code_file = (data_dir / "setup_code.py") if data_dir is not None else Path("setup_code.py")
 
-    helper_modules = _load_helper_modules(request, helper_module_names, import_blacklist)
-    clashes = _find_helper_name_clashes(workspace_dir, helper_modules)
-    if clashes:
-        # On one line, because the default output level only shows the first line of a failure.
-        pytest.fail(
-            f"These names are reserved for modules that this question provides: {', '.join(clashes)}. "
-            "Rename yours and update any imports that use them.",
-            pytrace=False,
-        )
-
     fixture = WorkspaceFixture(
         workspace_dir=workspace_dir,
         setup_code_file=setup_code_file,
@@ -568,7 +565,7 @@ def _initialize_workspace_fixture(
         names_for_user_list=names_for_user_list,
         worker_username=request.config.getoption("--worker-username"),
         exec_entry=exec_entry,
-        helper_modules=helper_modules,
+        helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
     )
     return fixture, initialization_timeout
 
@@ -985,7 +982,12 @@ class ResultCollectorPlugin:
 
                 logger.debug(f"Grading output level set to: {output_level}")
 
-                if output_level == GradingOutputLevel.Friendly:
+                if isinstance(call.excinfo.value, SandboxStartupFailed):
+                    # The sandbox startup handler already formatted this message for the
+                    # output level, so show it in full without another exception header.
+                    feedback_obj.add_message(str(call.excinfo.value))
+
+                elif output_level == GradingOutputLevel.Friendly:
                     # Friendly mode: show only the exception message text with
                     # no exception class name, traceback, or "failed with" prefix.
                     exception_message = str(call.excinfo.value)

@@ -265,6 +265,60 @@ def get_custom_importer(
     return custom_import
 
 
+def _module_is_from_dir(module: types.ModuleType, directory: str) -> bool:
+    """Whether *module* was loaded from a file or package inside *directory*."""
+    locations: list[str] = []
+    module_file = getattr(module, "__file__", None)
+    if isinstance(module_file, str):
+        locations.append(module_file)
+    module_path = getattr(module, "__path__", None)
+    if module_path is not None:
+        try:
+            locations.extend(str(p) for p in module_path)
+        except TypeError:
+            pass
+    for location in locations:
+        real_location = os.path.realpath(location)
+        if real_location == directory or real_location.startswith(directory + os.sep):
+            return True
+    return False
+
+
+def _find_shadowed_workspace_files(workspace_dir: str) -> list[str]:
+    """
+    Return the top-level ``.py`` files and folders in *workspace_dir* whose names match a module
+    that this process has already loaded from somewhere else.
+
+    Python reuses an already loaded module on import, so the student's file would be silently
+    ignored.  Folders are listed with a trailing slash.
+    """
+    real_dir = os.path.realpath(workspace_dir)
+    clashes: list[str] = []
+    for entry in sorted(os.listdir(real_dir)):
+        path = os.path.join(real_dir, entry)
+        if entry.endswith(".py") and os.path.isfile(path):
+            name, label = entry[:-3], entry
+        elif os.path.isdir(path):
+            name, label = entry, entry + "/"
+        else:
+            continue
+        module = sys.modules.get(name)
+        if module is not None and not _module_is_from_dir(module, real_dir):
+            clashes.append(label)
+    return clashes
+
+
+def _find_helper_name_clashes(workspace_dir: str, helper_modules: dict[str, str] | None) -> list[str]:
+    """Return the student's files and folders that an import of a helper module would silently replace."""
+    clashes: list[str] = []
+    for name in helper_modules or {}:
+        if os.path.isdir(os.path.join(workspace_dir, name)):
+            clashes.append(f"{name}/")
+        elif os.path.isfile(os.path.join(workspace_dir, f"{name}.py")):
+            clashes.append(f"{name}.py")
+    return clashes
+
+
 async def student_code_runner(
     setup_code: str | None,
     student_code: str,
@@ -385,12 +439,34 @@ async def workspace_runner(
     executes an entry-point file (exec_entry) and runs setup_code exactly as the
     regular student_code_runner does.
     """
+    # Check before anything else runs, so the result depends only on what the sandbox loads
+    # for itself and not on what the setup code or the student's code imports.
+    helper_clashes = _find_helper_name_clashes(workspace_dir, helper_modules)
+    shadowed_files = [f for f in _find_shadowed_workspace_files(workspace_dir) if f not in helper_clashes]
+
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
     execution_error: Exception | None = None
     exception_traceback = None
     local_vars = deepcopy(starting_vars) if starting_vars else {}
     local_vars["__from_server_json"] = from_server_json
+
+    if helper_clashes or shadowed_files:
+        reasons = []
+        if helper_clashes:
+            reasons.append(f"These names are reserved for modules that this question provides: {', '.join(helper_clashes)}.")
+        if shadowed_files:
+            reasons.append(f"These names are already used by modules that the grader has loaded: {', '.join(shadowed_files)}.")
+        clash_error = ImportError(" ".join(reasons) + " Rename yours and update any imports that use them.")
+        start_response: ProcessStartResponse = {
+            "status": ProcessStatusCode.EXCEPTION,
+            "stdout": "",
+            "stderr": "",
+            "execution_error": type(clash_error).__name__,
+            "execution_message": str(clash_error),
+            "execution_traceback": "",
+        }
+        return local_vars, {}, start_response
 
     student_code_vars: dict[str, Any] = {}
     student_code_vars["__builtins__"] = get_builtins(builtin_whitelist)
