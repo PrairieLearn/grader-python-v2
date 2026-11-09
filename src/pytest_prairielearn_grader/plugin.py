@@ -8,7 +8,6 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 from typing import NamedTuple
-from typing import NoReturn
 from typing import cast
 
 import _pytest
@@ -45,9 +44,8 @@ class SandboxStartupFailed(Failed):
     shows it to the student as it is instead of wrapping it in another exception header.
     """
 
-
-def _fail_startup(message: str) -> NoReturn:
-    raise SandboxStartupFailed(message, pytrace=False)
+    def __init__(self, msg: str | None = None, pytrace: bool = False) -> None:
+        super().__init__(msg, pytrace)
 
 
 class TestResult(NamedTuple):
@@ -143,7 +141,7 @@ def _load_helper_modules(
         except (OSError, ValueError, SyntaxError) as e:
             message = f"Autograder configuration error in helper_modules: can't use '{name}': {e}"
             request.config.result_collector_plugin.collection_errors.append(message)  # type: ignore[attr-defined]
-            _fail_startup(message)
+            raise SandboxStartupFailed(message) from e
     return sources
 
 
@@ -296,30 +294,30 @@ def _handle_sandbox_startup_errors(
         exception_message = response.get("execution_message", "") or ""
 
         if output_level == GradingOutputLevel.Friendly:
-            _fail_startup(exception_message or str(exception_name))
+            raise SandboxStartupFailed(exception_message or str(exception_name))
 
         fail_message = f"Student code execution failed with an exception: {exception_name}"
 
         if output_level == GradingOutputLevel.ExceptionName:
-            _fail_startup(fail_message)
+            raise SandboxStartupFailed(fail_message)
 
         fail_message += f"{os.linesep}Exception Message: {exception_message}"
 
         if output_level == GradingOutputLevel.ExceptionMessage:
-            _fail_startup(fail_message)
+            raise SandboxStartupFailed(fail_message)
 
         assert output_level == GradingOutputLevel.FullTraceback
 
         if exception_traceback := response.get("execution_traceback", ""):
             fail_message += f"{os.linesep * 2}{exception_traceback}"
 
-        _fail_startup(fail_message)
+        raise SandboxStartupFailed(fail_message)
 
     elif response_status == ProcessStatusCode.TIMEOUT:
-        _fail_startup("Student code initialization timed out")
+        raise SandboxStartupFailed("Student code initialization timed out")
 
     elif response_status == ProcessStatusCode.NO_RESPONSE:
-        _fail_startup(f"No response from initialization with timeout {initialization_timeout}")
+        raise SandboxStartupFailed(f"No response from initialization with timeout {initialization_timeout}")
 
     elif response_status != ProcessStatusCode.SUCCESS:
         logger.warning(f"Unexpected status in response from student code server: {response}")
