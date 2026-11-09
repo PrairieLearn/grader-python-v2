@@ -143,19 +143,8 @@ def _load_helper_modules(
         except (OSError, ValueError, SyntaxError) as e:
             message = f"Autograder configuration error in helper_modules: can't use '{name}': {e}"
             request.config.result_collector_plugin.collection_errors.append(message)  # type: ignore[attr-defined]
-            pytest.fail(message, pytrace=False)
+            _fail_startup(message)
     return sources
-
-
-def _find_helper_name_clashes(workspace_dir: Path, helper_modules: dict[str, str] | None) -> list[str]:
-    """Return the student's files and folders that an import of a helper module would silently replace."""
-    clashes: list[str] = []
-    for name in helper_modules or {}:
-        if (workspace_dir / name).is_dir():
-            clashes.append(f"{name}/")
-        elif (workspace_dir / f"{name}.py").is_file():
-            clashes.append(f"{name}.py")
-    return clashes
 
 
 def _initialize_sandbox_fixture(
@@ -568,16 +557,6 @@ def _initialize_workspace_fixture(
     data_dir = get_datadir(request.module)
     setup_code_file = (data_dir / "setup_code.py") if data_dir is not None else Path("setup_code.py")
 
-    helper_modules = _load_helper_modules(request, helper_module_names, import_blacklist)
-    clashes = _find_helper_name_clashes(workspace_dir, helper_modules)
-    if clashes:
-        # On one line, because the default output level only shows the first line of a failure.
-        pytest.fail(
-            f"These names are reserved for modules that this question provides: {', '.join(clashes)}. "
-            "Rename yours and update any imports that use them.",
-            pytrace=False,
-        )
-
     fixture = WorkspaceFixture(
         workspace_dir=workspace_dir,
         setup_code_file=setup_code_file,
@@ -588,7 +567,7 @@ def _initialize_workspace_fixture(
         names_for_user_list=names_for_user_list,
         worker_username=request.config.getoption("--worker-username"),
         exec_entry=exec_entry,
-        helper_modules=helper_modules,
+        helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
     )
     return fixture, initialization_timeout
 

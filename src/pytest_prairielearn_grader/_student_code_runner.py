@@ -308,6 +308,17 @@ def find_shadowed_workspace_files(workspace_dir: str) -> list[str]:
     return clashes
 
 
+def find_helper_name_clashes(workspace_dir: str, helper_modules: dict[str, str] | None) -> list[str]:
+    """Return the student's files and folders that an import of a helper module would silently replace."""
+    clashes: list[str] = []
+    for name in helper_modules or {}:
+        if os.path.isdir(os.path.join(workspace_dir, name)):
+            clashes.append(f"{name}/")
+        elif os.path.isfile(os.path.join(workspace_dir, f"{name}.py")):
+            clashes.append(f"{name}.py")
+    return clashes
+
+
 async def student_code_runner(
     setup_code: str | None,
     student_code: str,
@@ -430,7 +441,8 @@ async def workspace_runner(
     """
     # Check before anything else runs, so the result depends only on what the sandbox loads
     # for itself and not on what the setup code or the student's code imports.
-    shadowed_files = find_shadowed_workspace_files(workspace_dir)
+    helper_clashes = find_helper_name_clashes(workspace_dir, helper_modules)
+    shadowed_files = [f for f in find_shadowed_workspace_files(workspace_dir) if f not in helper_clashes]
 
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
@@ -439,17 +451,19 @@ async def workspace_runner(
     local_vars = deepcopy(starting_vars) if starting_vars else {}
     local_vars["__from_server_json"] = from_server_json
 
-    if shadowed_files:
-        shadowed_error = ImportError(
-            f"These names are already used by modules that the grader has loaded: {', '.join(shadowed_files)}. "
-            "Rename yours and update any imports that use them."
-        )
+    if helper_clashes or shadowed_files:
+        reasons = []
+        if helper_clashes:
+            reasons.append(f"These names are reserved for modules that this question provides: {', '.join(helper_clashes)}.")
+        if shadowed_files:
+            reasons.append(f"These names are already used by modules that the grader has loaded: {', '.join(shadowed_files)}.")
+        clash_error = ImportError(" ".join(reasons) + " Rename yours and update any imports that use them.")
         start_response: ProcessStartResponse = {
             "status": ProcessStatusCode.EXCEPTION,
             "stdout": "",
             "stderr": "",
-            "execution_error": type(shadowed_error).__name__,
-            "execution_message": str(shadowed_error),
+            "execution_error": type(clash_error).__name__,
+            "execution_message": str(clash_error),
             "execution_traceback": "",
         }
         return local_vars, {}, start_response

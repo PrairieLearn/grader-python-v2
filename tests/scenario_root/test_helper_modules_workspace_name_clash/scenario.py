@@ -1,4 +1,4 @@
-"""A student file with the same name as a helper module gets a message asking them to rename it."""
+"""A student file named like a helper module, or like a module the grader has loaded, gets a rename message."""
 
 import pytest
 
