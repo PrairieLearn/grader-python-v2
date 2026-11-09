@@ -320,7 +320,7 @@ class _SandboxBase:
             case FunctionStatusCode.TIMEOUT:
                 raise TimeoutError(f"Query for function '{function_name}' timed out after {query_timeout} seconds.")
             case FunctionStatusCode.NOT_FOUND:
-                raise NameError(f"Query for function '{function_name}' failed: {response['exception_message']}")
+                raise NameError(response["exception_message"])
             case FunctionStatusCode.NOT_SERIALIZABLE:
                 raise RuntimeError(response["exception_message"])
         return from_json(response["value"])

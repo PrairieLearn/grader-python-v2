@@ -4,7 +4,7 @@
     "tests": [
       {
         "max_points": 6,
-        "message": "Function 'analyze_vibration' raised an exception",
+        "message": "Function 'analyze_vibration' wasn't found in the student code",
         "name": "Test analyze_vibration function",
         "outcome": "failed",
         "points_frac": 0.0,
@@ -13,7 +13,7 @@
       },
       {
         "max_points": 6,
-        "message": "Function 'analyze_vibration' raised an exception",
+        "message": "Function 'analyze_vibration' wasn't found in the student code",
         "name": "Test analyze_vibration function",
         "outcome": "failed",
         "points_frac": 0.0,

@@ -171,6 +171,7 @@ Calls a function defined in the student code with the given arguments and **retu
 
 - **On success**: Returns the function's return value
 - **On error**: Raises a `RuntimeError` with details about the exception
+- **If the function doesn't exist**: Raises a `NameError` saying so
 
 **Example:**
 
@@ -228,7 +229,7 @@ def test_raises_value_error(sandbox: StudentFixture, feedback: FeedbackFixture) 
 
 The `query_function_raw` response contains:
 
-- `status`: One of `"success"`, `"exception"`, `"timeout"`, `"not_found"`, or `"not_serializable"`. `"not_serializable"` means the function finished, but its return value can't be sent back to the grader. `exception_message` explains this, and later queries on the sandbox still work.
+- `status`: One of `"success"`, `"exception"`, `"timeout"`, `"not_found"`, or `"not_serializable"`. `"not_found"` means the function doesn't exist, and only the lookup can cause it: an error raised while the function runs, even a `KeyError` or `ImportError`, is `"exception"`. `"not_serializable"` means the function finished, but its return value can't be sent back to the grader. `exception_message` explains this, and later queries on the sandbox still work.
 - `value`: The return value (when status is `"success"`)
 - `stdout` / `stderr`: Captured output from the function call
 - `exception_name`: The exception class name (e.g., `"ValueError"`)
