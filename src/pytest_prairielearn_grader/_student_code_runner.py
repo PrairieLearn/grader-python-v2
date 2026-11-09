@@ -161,6 +161,21 @@ async def student_function_runner(
         return json.dumps(not_serializable_response)
 
 
+def _find_blacklisted(name: str, fromlist: Sequence[str], import_blacklist: list[str]) -> str | None:
+    """
+    Returns the module that an import would load in spite of the blacklist, or None.
+
+    A blacklisted entry also covers its submodules, so "os" blocks `import os.path`, and
+    "matplotlib.pyplot" blocks `from matplotlib import pyplot` but not `import matplotlib`.
+    """
+    names = [name, *(f"{name}.{item}" for item in fromlist if item != "*")]
+    for candidate in names:
+        for entry in import_blacklist:
+            if candidate == entry or candidate.startswith(entry + "."):
+                return candidate
+    return None
+
+
 class _HelperModules:
     """
     Loads the modules named by the helper_modules setting from the source sent by the grader.
@@ -210,7 +225,8 @@ def get_custom_importer(
     When *workspace_dir* is given, any module whose top-level package name resolves to a file or
     directory inside that directory is unconditionally allowed, so that student modules can import
     each other without instructors needing to maintain a manual whitelist of their own files.
-    Relative imports (level > 0) are always permitted for the same reason.
+    Relative imports (level > 0) are always permitted for the same reason. Imports made by library
+    modules outside that directory aren't restricted, so an allowed library can load what it needs.
 
     Modules in *helper_modules* can be imported without being on the whitelist, and they take
     priority over workspace files with the same name. The grader rejects any that are blacklisted.
@@ -238,6 +254,17 @@ def get_custom_importer(
         if level > 0:
             return original_import(name, globals, locals, fl, level)
 
+        # In workspace mode this importer replaces builtins.__import__ for the whole process, so it
+        # also sees imports made inside libraries, such as numpy's own `import os`. The rules are
+        # for student code, so let through imports made by a module file outside the workspace.
+        # Code with no module file, such as setup code and the entry point, is still restricted.
+        # The caller's frame is used rather than the globals argument, because some libraries call
+        # __import__ directly without one (pandas does for its dependencies).
+        if _ws_str is not None:
+            importer_file = sys._getframe(1).f_globals.get("__file__")
+            if isinstance(importer_file, str) and not importer_file.startswith(_ws_str + os.sep):
+                return original_import(name, globals, locals, fl, level)
+
         if helper_modules is not None and name in helper_modules:
             return helper_modules.load(name)
 
@@ -250,8 +277,8 @@ def get_custom_importer(
                 return original_import(name, globals, locals, fl, level)
 
         # Apply blacklist / whitelist to external imports.
-        if import_blacklist is not None and name in import_blacklist:
-            raise ImportError(f"Module '{name}' is blacklisted and cannot be imported.")
+        if import_blacklist is not None and (blocked := _find_blacklisted(name, fl, import_blacklist)) is not None:
+            raise ImportError(f"Module '{blocked}' is blacklisted and cannot be imported.")
         elif (
             (import_whitelist is not None and name in import_whitelist)
             or name.startswith("_")  # Allow Python internal/private modules (_io, _abc, _collections, etc.)

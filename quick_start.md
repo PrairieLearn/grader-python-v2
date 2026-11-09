@@ -557,6 +557,10 @@ def my_function():
 
 **Note**: Blacklist is checked first, then whitelist. If a whitelist is specified, only those modules (minus any in blacklist) can be imported. If only a blacklist is specified, those modules are blocked but all others are allowed.
 
+A blacklisted module also blocks its submodules, however they're imported. With `"os"` in the blacklist, `import os.path` is blocked as well as `import os`. With `"matplotlib.pyplot"`, both `import matplotlib.pyplot` and `from matplotlib import pyplot` are blocked, but `import matplotlib` still works.
+
+The blacklist only checks import statements, so it isn't a security boundary. For example, modules that student code is allowed to import can expose `os` as an attribute.
+
 #### Builtin Function Control
 
 Python's builtin functions (like `open()`, `eval()`, `exec()`) are automatically restricted to a safe subset. The autograder provides **only safe builtins by default**, including:
@@ -1567,7 +1571,11 @@ autograder_config = ConfigObject(
 
 - The default `import_blacklist` (`["os", "sys", "subprocess", "pathlib", "shutil"]`) is
   applied in workspace mode too. If the student's project legitimately uses `pathlib` for
-  internal file operations, add it to `import_whitelist` explicitly.
+  internal file operations, set `import_blacklist` to a list without it. Adding it to
+  `import_whitelist` doesn't help, because the blacklist is checked first.
+- `import_whitelist` and `import_blacklist` apply to imports in the student's project, setup code
+  and the entry point. They don't apply to imports made inside library code, so an allowed library
+  such as `numpy` or `pandas` can still load `os` and its other dependencies.
 - `sys.path` inside the subprocess is modified to include `workspace_student_dir`, so all
   relative imports within the project work naturally.
 - Each call to `workspace_sandbox.query_function` runs in the same subprocess, so module-level
