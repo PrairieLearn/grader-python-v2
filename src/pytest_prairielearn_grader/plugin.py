@@ -132,23 +132,13 @@ def _load_helper_modules(
 
 
 def _find_helper_name_clashes(workspace_dir: Path, helper_modules: dict[str, str] | None) -> list[str]:
-    """
-    Return the student's files and folders that an import of a helper module would silently replace.
-
-    An identical copy isn't a clash, since instructors may give students one to work with.
-    """
+    """Return the student's files and folders that an import of a helper module would silently replace."""
     clashes: list[str] = []
-    for name, source in (helper_modules or {}).items():
-        file_path = workspace_dir / f"{name}.py"
+    for name in helper_modules or {}:
         if (workspace_dir / name).is_dir():
             clashes.append(f"{name}/")
-        elif file_path.is_file():
-            try:
-                is_copy = file_path.read_text(encoding="utf-8") == source
-            except (OSError, UnicodeDecodeError):
-                is_copy = False
-            if not is_copy:
-                clashes.append(file_path.name)
+        elif (workspace_dir / f"{name}.py").is_file():
+            clashes.append(f"{name}.py")
     return clashes
 
 

@@ -77,8 +77,9 @@ class ConfigObject:
     also blocks is a configuration error. A helper module runs in the sandbox with the same
     builtins and import rules as student code.
 
-    In workspace mode, a helper module takes priority over a student file with the same name
-    when imported, and it keeps these restricted builtins, unlike the student's own modules.
+    In workspace mode, a listed name is reserved: a student file or folder with that name fails
+    the submission with a message asking the student to rename it. A helper module keeps these
+    restricted builtins, unlike the student's own modules.
 
     Students can read everything in a helper module, so it must not contain answers.
 

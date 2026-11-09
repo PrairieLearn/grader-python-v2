@@ -381,9 +381,9 @@ import helper_function as hf
 - **Fixtures:** it works with `sandbox` and `module_sandbox`, for `.py` and `.ipynb` submissions, and
   with `workspace_sandbox`.
 - **Workspace mode:** students can have several files that import each other, so a listed name is
-  reserved. If a student submits a different `helper_function.py` or a `helper_function/` folder, the
-  submission fails with a message asking them to rename it and counts as an attempt. An identical copy
-  is fine, so you can give students one to work with. A listed module keeps the restricted builtins
+  reserved. If a student submits a `helper_function.py` or a `helper_function/` folder, the
+  submission fails with a message asking them to rename it and counts as an attempt. Don't give
+  students a copy of a helper module in their workspace. A listed module keeps the restricted builtins
   that the student's own modules don't have. Dotted queries such as
   `query_function("helper_function.triple")` only search the student's project, so they won't call a
   helper module.

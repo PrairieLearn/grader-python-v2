@@ -1,4 +1,4 @@
-"""Helper modules in workspace mode, including a student's identical copy of one."""
+"""Helper modules in workspace mode."""
 
 import pytest
 
@@ -30,11 +30,6 @@ def test_entry_point(workspace_sandbox: WorkspaceFixture) -> None:
 def test_student_module(workspace_sandbox: WorkspaceFixture) -> None:
     assert workspace_sandbox.query_function("calculator.triple_it", 2) == 6
     assert workspace_sandbox.query_function("calculator.add_one", 2) == 3
-
-
-@pytest.mark.grading_data(name="identical copy of a helper module", points=1)
-def test_identical_copy(workspace_sandbox: WorkspaceFixture) -> None:
-    assert workspace_sandbox.query_function("calculator.source") == "instructor"
 
 
 @pytest.mark.grading_data(name="builtins", points=1)

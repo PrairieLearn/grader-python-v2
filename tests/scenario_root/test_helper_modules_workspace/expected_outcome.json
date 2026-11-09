@@ -32,15 +32,6 @@
       {
         "max_points": 1,
         "message": "",
-        "name": "identical copy of a helper module",
-        "outcome": "passed",
-        "points": 1.0,
-        "points_frac": 1.0,
-        "test_id": "test_helper_modules_workspace.py::test_identical_copy"
-      },
-      {
-        "max_points": 1,
-        "message": "",
         "name": "builtins",
         "outcome": "passed",
         "points": 1.0,

@@ -6,10 +6,6 @@ def triple_it(x):
     return helper_function.triple(x)
 
 
-def source():
-    return helper_function.SOURCE
-
-
 def add_one(x):
     return second_helper.add_one(x)
 
