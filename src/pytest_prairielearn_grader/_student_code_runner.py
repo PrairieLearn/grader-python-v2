@@ -161,6 +161,21 @@ async def student_function_runner(
         return json.dumps(not_serializable_response)
 
 
+def _find_blacklisted(name: str, fromlist: Sequence[str], import_blacklist: list[str]) -> str | None:
+    """
+    Returns the module that an import would load in spite of the blacklist, or None.
+
+    A blacklisted entry also covers its submodules, so "os" blocks `import os.path`, and
+    "matplotlib.pyplot" blocks `from matplotlib import pyplot` but not `import matplotlib`.
+    """
+    names = [name, *(f"{name}.{item}" for item in fromlist if item != "*")]
+    for candidate in names:
+        for entry in import_blacklist:
+            if candidate == entry or candidate.startswith(entry + "."):
+                return candidate
+    return None
+
+
 def get_custom_importer(
     import_whitelist: list[str] | None,
     import_blacklist: list[str] | None,
@@ -207,8 +222,8 @@ def get_custom_importer(
                 return original_import(name, globals, locals, fl, level)
 
         # Apply blacklist / whitelist to external imports.
-        if import_blacklist is not None and name in import_blacklist:
-            raise ImportError(f"Module '{name}' is blacklisted and cannot be imported.")
+        if import_blacklist is not None and (blocked := _find_blacklisted(name, fl, import_blacklist)) is not None:
+            raise ImportError(f"Module '{blocked}' is blacklisted and cannot be imported.")
         elif (
             (import_whitelist is not None and name in import_whitelist)
             or name.startswith("_")  # Allow Python internal/private modules (_io, _abc, _collections, etc.)

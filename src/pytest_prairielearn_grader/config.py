@@ -57,7 +57,8 @@ class ConfigObject:
     import_blacklist: list[str] | None = None
     """List of Python modules that student code is prohibited from importing.
 
-    Modules in the blacklist are always blocked, even if in the whitelist.
+    Modules in the blacklist are always blocked, even if in the whitelist, and so are their
+    submodules: "os" also blocks `import os.path`.
     Can be combined with import_whitelist for fine-grained control.
     Default blocks dangerous system operations: ["os", "sys", "subprocess", "pathlib", "shutil"].
 
