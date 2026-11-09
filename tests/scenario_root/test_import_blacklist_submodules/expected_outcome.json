@@ -1,0 +1,43 @@
+{
+  "expected_data_object": {
+    "score": 1.0,
+    "tests": [
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "blocked",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_import_blacklist_submodules.py::test_blocked[student_code-import_pyplot]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "blocked",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_import_blacklist_submodules.py::test_blocked[student_code-from_matplotlib_import_pyplot]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "allowed",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_import_blacklist_submodules.py::test_allowed[student_code-import_matplotlib-matplotlib]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "allowed",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_import_blacklist_submodules.py::test_allowed[student_code-from_matplotlib_import_colors-matplotlib.colors]"
+      }
+    ]
+  }
+}

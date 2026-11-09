@@ -1,0 +1,16 @@
+{
+  "expected_data_object": {
+    "gradable": true,
+    "score": 0.0,
+    "tests": [
+      {
+        "test_id": "test_workspace_shadowed_module.py::test_uses_random",
+        "message": "Student code execution failed with an exception: ImportError\nException Message: These names are already used by modules that the grader has loaded: json/, random.py. Rename yours and update any imports that use them.",
+        "outcome": "error",
+        "max_points": 1,
+        "points": 0.0,
+        "points_frac": 0.0
+      }
+    ]
+  }
+}

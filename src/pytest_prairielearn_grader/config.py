@@ -1,5 +1,6 @@
 """Configuration dataclass for pytest-prairielearn-grader."""
 
+import keyword
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
@@ -57,11 +58,33 @@ class ConfigObject:
     import_blacklist: list[str] | None = None
     """List of Python modules that student code is prohibited from importing.
 
-    Modules in the blacklist are always blocked, even if in the whitelist.
+    Modules in the blacklist are always blocked, even if in the whitelist, and so are their
+    submodules: "os" also blocks `import os.path`.
     Can be combined with import_whitelist for fine-grained control.
     Default blocks dangerous system operations: ["os", "sys", "subprocess", "pathlib", "shutil"].
 
     Example: ["requests", "socket"]
+    """
+
+    helper_modules: list[str] | None = None
+    """Modules from the tests folder that setup code, leading code and student code can import.
+
+    Each entry is a plain module name, so "helper_function" loads helper_function.py from
+    the folder that holds leading_code.py. Packages, dots, paths and the ".py" suffix aren't
+    accepted. Importing anything else in that folder still fails, because the folder isn't
+    added to the import path.
+
+    Listed modules don't need to be in import_whitelist. Listing one that import_blacklist
+    also blocks is a configuration error. A helper module runs in the sandbox with the same
+    builtins and import rules as student code.
+
+    In workspace mode, a listed name is reserved: a student file or folder with that name fails
+    the submission with a message asking the student to rename it. A helper module keeps these
+    restricted builtins, unlike the student's own modules.
+
+    Students can read everything in a helper module, so it must not contain answers.
+
+    Example: ["helper_function"]
     """
 
     builtin_whitelist: list[str] | None = None
@@ -230,6 +253,16 @@ class ConfigObject:
             for module_name in self.import_blacklist:
                 if not isinstance(module_name, str) or not module_name.strip():
                     raise ValueError(f"import_blacklist must contain non-empty strings, got: {module_name!r}")
+
+        # Validate helper_modules contains plain module names
+        if self.helper_modules is not None:
+            if not isinstance(self.helper_modules, list):
+                raise TypeError(f"helper_modules must be a list, got {type(self.helper_modules).__name__}")
+            if not self.helper_modules:
+                raise ValueError("helper_modules cannot be empty (use None for no helper modules)")
+            for module_name in self.helper_modules:
+                if not isinstance(module_name, str) or not module_name.isidentifier() or keyword.iskeyword(module_name):
+                    raise ValueError(f"helper_modules must contain plain module names without dots, paths or '.py', got: {module_name!r}")
 
         # Validate builtin_whitelist contains non-empty strings
         if self.builtin_whitelist is not None:
