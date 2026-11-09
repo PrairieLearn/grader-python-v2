@@ -284,7 +284,7 @@ def _module_is_from_dir(module: types.ModuleType, directory: str) -> bool:
     return False
 
 
-def find_shadowed_workspace_files(workspace_dir: str) -> list[str]:
+def _find_shadowed_workspace_files(workspace_dir: str) -> list[str]:
     """
     Return the top-level ``.py`` files and folders in *workspace_dir* whose names match a module
     that this process has already loaded from somewhere else.
@@ -308,7 +308,7 @@ def find_shadowed_workspace_files(workspace_dir: str) -> list[str]:
     return clashes
 
 
-def find_helper_name_clashes(workspace_dir: str, helper_modules: dict[str, str] | None) -> list[str]:
+def _find_helper_name_clashes(workspace_dir: str, helper_modules: dict[str, str] | None) -> list[str]:
     """Return the student's files and folders that an import of a helper module would silently replace."""
     clashes: list[str] = []
     for name in helper_modules or {}:
@@ -441,8 +441,8 @@ async def workspace_runner(
     """
     # Check before anything else runs, so the result depends only on what the sandbox loads
     # for itself and not on what the setup code or the student's code imports.
-    helper_clashes = find_helper_name_clashes(workspace_dir, helper_modules)
-    shadowed_files = [f for f in find_shadowed_workspace_files(workspace_dir) if f not in helper_clashes]
+    helper_clashes = _find_helper_name_clashes(workspace_dir, helper_modules)
+    shadowed_files = [f for f in _find_shadowed_workspace_files(workspace_dir) if f not in helper_clashes]
 
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
