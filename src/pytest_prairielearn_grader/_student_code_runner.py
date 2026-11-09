@@ -90,19 +90,19 @@ def _resolve_dotted_name(name: str, student_code_vars: dict[str, Any]) -> Any:
     return student_code_vars[name]
 
 
-class _FunctionNotFoundError(Exception):
+class FunctionNotFoundError(Exception):
     """The requested function doesn't exist. Only the lookup raises this, never the student's call."""
 
 
 def _look_up_function(name: str, student_code_vars: dict[str, Any], workspace_mode: bool) -> Any:
     """
-    Find a student function by name, raising _FunctionNotFoundError if it doesn't exist.
+    Find a student function by name, raising FunctionNotFoundError if it doesn't exist.
 
     In workspace mode, importing a dotted name's module runs student code. If that code fails, the
     error isn't caught here unless the failure is that the requested module itself doesn't exist,
     so a student module that exists but has a bad import is reported as an exception.
     """
-    not_found = _FunctionNotFoundError(f"Function '{name}' wasn't found in the student code")
+    not_found = FunctionNotFoundError(f"Function '{name}' wasn't found in the student code")
     if workspace_mode and "." in name:
         module_path, attr_name = name.rsplit(".", 1)
         try:
@@ -151,7 +151,7 @@ async def student_function_runner(
             else:
                 execution_error = asyncio.TimeoutError(f"Function timed out after {timeout} seconds")
                 timed_out = True
-    except _FunctionNotFoundError as e:
+    except FunctionNotFoundError as e:
         execution_error = NameError(str(e))
         function_not_found = True
     except Exception as e:
