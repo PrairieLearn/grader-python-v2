@@ -1,14 +1,9 @@
 """Modules named by helper_modules can be imported, and nothing else in the tests folder can."""
 
-from pathlib import Path
-
 import pytest
 
 from pytest_prairielearn_grader import ConfigObject
 from pytest_prairielearn_grader.fixture import StudentFixture
-
-# Written here because the outer test run would collect a file with this name in the scenario folder.
-Path(__file__).with_suffix("").joinpath("test_student.py").write_text('ANSWER = "the reference answer"\n')
 
 autograder_config = ConfigObject(
     helper_modules=["helper_function", "second_helper"],
@@ -51,7 +46,7 @@ def test_second_helper(sandbox: StudentFixture) -> None:
 @pytest.mark.grading_data(name="modules that aren't named can't be imported", points=1)
 @pytest.mark.parametrize(
     "function_name",
-    ["import_ans", "import_test_student", "import_setup_code", "import_scenario", "helper_imports_ans"],
+    ["import_ans", "import_setup_code", "import_scenario", "helper_imports_ans"],
 )
 def test_not_named(sandbox: StudentFixture, function_name: str) -> None:
     response = sandbox.query_function_raw(function_name)

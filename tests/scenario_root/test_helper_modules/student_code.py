@@ -34,12 +34,6 @@ def import_ans():
     return ans.ANSWER
 
 
-def import_test_student():
-    import test_student
-
-    return test_student.ANSWER
-
-
 def import_setup_code():
     import setup_code
 

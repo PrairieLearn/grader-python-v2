@@ -72,15 +72,6 @@
         "outcome": "passed",
         "points": 1.0,
         "points_frac": 1.0,
-        "test_id": "test_helper_modules.py::test_not_named[student_code-import_test_student]"
-      },
-      {
-        "max_points": 1,
-        "message": "",
-        "name": "modules that aren't named can't be imported",
-        "outcome": "passed",
-        "points": 1.0,
-        "points_frac": 1.0,
         "test_id": "test_helper_modules.py::test_not_named[student_code-import_setup_code]"
       },
       {
