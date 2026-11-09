@@ -107,6 +107,7 @@ prairielearn-grader = "pytest_prairielearn_grader.plugin"
 exclude = [
     "tests/scenario_root/.*(student_code.*|setup_code)\\.py",
     "tests/scenario_root/.*/student/.*\\.py",
+    "tests/scenario_root/test_helper_modules[^/]*/(helper_function|second_helper|leading_code)\\.py",
 ]
 
 [[tool.mypy.overrides]]

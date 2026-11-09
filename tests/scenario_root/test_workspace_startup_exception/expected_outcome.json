@@ -1,0 +1,15 @@
+{
+  "expected_data_object": {
+    "score": 0.0,
+    "tests": [
+      {
+        "test_id": "test_workspace_startup_exception.py::test_entry_raises",
+        "message": "Student code execution failed with an exception: ImportError\nException Message: main.py could not find the data it needs",
+        "outcome": "error",
+        "max_points": 1,
+        "points": 0.0,
+        "points_frac": 0.0
+      }
+    ]
+  }
+}

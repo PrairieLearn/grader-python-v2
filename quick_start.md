@@ -347,9 +347,50 @@ All parameters are optional with sensible defaults:
 - **`import_whitelist`** (list[str] | None): Allowed import modules (whitelist mode)
 - **`import_blacklist`** (list[str] | None): Blocked import modules (blacklist mode)
 - **`builtin_whitelist`** (list[str] | None): Allowed builtin functions
+- **`helper_modules`** (list[str] | None): Modules from the tests folder that can be imported (see [Helper Modules](#helper-modules))
 - **`names_for_user`** (list[str] | None): List of variable names to inject into student code
 - **`student_code_pattern`** (str, default="student_code\*.py"): Glob pattern for finding student files
 - **`starting_vars`** (dict[str, Any], default={}): Dictionary of variable values to provide for injection
+
+#### Helper Modules
+
+The tests folder isn't on the import path in the sandbox, and `import_whitelist` only permits a
+name. To let setup code, `leading_code.py` and student code import a file from that folder, name it
+in `helper_modules`:
+
+```python
+# tests/test_student.py, with the helper in tests/helper_function.py
+autograder_config = ConfigObject(helper_modules=["helper_function"])
+```
+
+```python
+# tests/leading_code.py, or the student's code
+import helper_function as hf
+```
+
+- **Names:** each entry is a plain module name, without dots, paths or `.py`. Packages aren't supported.
+- **Everything else stays out:** other files in the folder, such as `test_student.py`, still can't be
+  imported, even if they're in `import_whitelist`.
+- **Import restrictions:** a listed module doesn't need to be in `import_whitelist`. Listing one that
+  `import_blacklist` also blocks is a configuration error.
+- **Inside a helper module:** it runs with the same builtins and import rules as student code. For
+  example, it can't use `sum` or import `numpy` unless those are allowed.
+- **Configuration errors:** if a listed file is missing or has a syntax error, or the module is
+  blacklisted, the submission is ungradable. The students don't lose an attempt, and each test's
+  message says what's wrong.
+- **Fixtures:** it works with `sandbox` and `module_sandbox`, for `.py` and `.ipynb` submissions, and
+  with `workspace_sandbox`.
+- **Workspace mode:** students can have several files that import each other, so a listed name is
+  reserved. If a student submits a `helper_function.py` or a `helper_function/` folder, the
+  submission fails with a message asking them to rename it and counts as an attempt. Don't give
+  students a copy of a helper module in their workspace. A listed module keeps the restricted builtins
+  that the student's own modules don't have. Dotted queries such as
+  `query_function("helper_function.triple")` only search the student's project, so they won't call a
+  helper module.
+
+> **Warning:** Students can read everything in a helper module, so it must not contain answers. This
+> setting also doesn't make the rest of the tests folder private. `importlib` isn't blacklisted by
+> default, so student code can load files in that folder by path.
 
 **How variable injection works**:
 
@@ -1465,6 +1506,25 @@ def test_global_state(workspace_sandbox: WorkspaceFixture) -> None:
 Without `workspace_exec_entry` (the default), no file is executed at startup and all access
 goes through the import machinery.
 
+### Student Files Named Like Loaded Modules
+
+The sandbox loads some modules for itself before any student or setup code runs, such as
+`random`, `json`, `types`, `typing`, `logging` and `math`. Python reuses a module that's already
+loaded, so a student file named `random.py` (or a folder named `json/`) at the top of the project
+would be silently ignored in favor of the standard library module.
+
+Instead, startup fails and every test is an error worth 0 points, with a message listing the files
+and asking the student to rename them:
+
+```text
+Student code execution failed with an exception: ImportError
+Exception Message: These names are already used by modules that the grader has loaded: json/, random.py. Rename yours and update any imports that use them.
+```
+
+Only top-level `.py` files and folders are checked, and only against modules the sandbox has
+actually loaded. A file such as `calendar.py` or `utils.py` that doesn't match a loaded module is
+imported normally. The list of loaded modules can change between Python versions.
+
 ### ConfigObject Settings for Workspaces
 
 | Parameter               | Type                | Default      | Description                                                                                                   |
@@ -1475,6 +1535,7 @@ goes through the import machinery.
 | `sandbox_timeout`       | `float`             | `1.0`        | Timeout for sandbox startup (increase for larger projects).                                                   |
 | `import_whitelist`      | `list[str] \| None` | `None`       | Allowed imports. `None` = allow all.                                                                          |
 | `import_blacklist`      | `list[str] \| None` | default list | Blocked imports.                                                                                              |
+| `helper_modules`        | `list[str] \| None` | `None`       | Modules from the tests folder to make importable. See [Helper Modules](#helper-modules).                      |
 
 ### Production vs. Local Development
 

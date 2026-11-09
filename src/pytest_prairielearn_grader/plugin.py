@@ -15,6 +15,7 @@ import _pytest.reports
 import _pytest.terminal
 import pytest
 from _pytest.config import Config
+from _pytest.outcomes import Failed
 from prettytable import PrettyTable
 
 from .config import ConfigObject
@@ -32,6 +33,19 @@ logger = logging.getLogger(__name__)
 # Default configuration constants
 DEFAULT_SANDBOX_TIMEOUT = 1.0
 DEFAULT_IMPORT_BLACKLIST = ["os", "sys", "subprocess", "pathlib", "shutil"]
+
+
+class SandboxStartupFailed(Failed):
+    """
+    Raised when the student code sandbox fails to start (an exception, timeout or no response
+    while running student code at startup).
+
+    The message is already formatted for the test's output level, so the result collector
+    shows it to the student as it is instead of wrapping it in another exception header.
+    """
+
+    def __init__(self, msg: str | None = None, pytrace: bool = False) -> None:
+        super().__init__(msg, pytrace)
 
 
 class TestResult(NamedTuple):
@@ -99,6 +113,38 @@ def data_json(request: pytest.FixtureRequest) -> dict[str, Any] | None:
     #     raise ValueError(f"Data file '{data_file.name}' not found in '{datadir}'.")
 
 
+def _load_helper_modules(
+    request: pytest.FixtureRequest,
+    names: list[str] | None,
+    import_blacklist: list[str] | None,
+) -> dict[str, str] | None:
+    """
+    Read the source of each module named by the helper_modules setting.
+
+    A problem with these files is the instructor's to fix, so it makes the submission ungradable
+    instead of costing the student an attempt.
+    """
+    if names is None:
+        return None
+
+    data_dir = get_datadir(request.module)
+    sources: dict[str, str] = {}
+    for name in names:
+        path = None if data_dir is None else data_dir / f"{name}.py"
+        try:
+            if import_blacklist is not None and name in import_blacklist:
+                raise ValueError("it's also in import_blacklist, so it can't be imported")
+            if path is None or not path.is_file():
+                raise FileNotFoundError(f"{path} doesn't exist")
+            sources[name] = path.read_text(encoding="utf-8")
+            compile(sources[name], f"{name}.py", "exec")
+        except (OSError, ValueError, SyntaxError) as e:
+            message = f"Autograder configuration error in helper_modules: can't use '{name}': {e}"
+            request.config.result_collector_plugin.collection_errors.append(message)  # type: ignore[attr-defined]
+            raise SandboxStartupFailed(message) from e
+    return sources
+
+
 def _initialize_sandbox_fixture(
     request: pytest.FixtureRequest,
     data_json: dict[str, Any] | None,
@@ -127,6 +173,7 @@ def _initialize_sandbox_fixture(
     # Check for module-level ConfigObject that overrides all other configuration
     config_dict: dict[str, Any] = {}
     notebook_cell_tag: str | None = None
+    helper_module_names: list[str] | None = None
     if hasattr(request, "module") and hasattr(request.module, "autograder_config"):
         config_object = request.module.autograder_config
         if not isinstance(config_object, ConfigObject):
@@ -137,6 +184,7 @@ def _initialize_sandbox_fixture(
         initialization_timeout = config_object.sandbox_timeout
         config_starting_vars = config_object.starting_vars
         notebook_cell_tag = config_object.notebook_cell_tag
+        helper_module_names = config_object.helper_modules
     else:
         # Check for module-level timeout variable (works for module-scoped fixtures)
         # This allows setting: sandbox_timeout = 0.5 at module level
@@ -198,6 +246,7 @@ def _initialize_sandbox_fixture(
         names_for_user_list=names_for_user_list,
         worker_username=request.config.getoption("--worker-username"),
         notebook_cell_tag=notebook_cell_tag,
+        helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
     )
 
     return fixture, initialization_timeout
@@ -242,29 +291,33 @@ def _handle_sandbox_startup_errors(
         if exception_name == "SyntaxError":
             _record_syntax_error_as_ungradable(request, response)
 
+        exception_message = response.get("execution_message", "") or ""
+
         if output_level == GradingOutputLevel.Friendly:
-            exception_message = response.get("execution_message", "") or ""
-            pytest.fail(exception_message or str(exception_name), pytrace=False)
+            raise SandboxStartupFailed(exception_message or str(exception_name))
 
         fail_message = f"Student code execution failed with an exception: {exception_name}"
-        exception_message = response.get("execution_message", "") or ""
+
+        if output_level == GradingOutputLevel.ExceptionName:
+            raise SandboxStartupFailed(fail_message)
+
         fail_message += f"{os.linesep}Exception Message: {exception_message}"
 
         if output_level == GradingOutputLevel.ExceptionMessage:
-            pytest.fail(fail_message, pytrace=False)
+            raise SandboxStartupFailed(fail_message)
 
         assert output_level == GradingOutputLevel.FullTraceback
 
         if exception_traceback := response.get("execution_traceback", ""):
             fail_message += f"{os.linesep * 2}{exception_traceback}"
 
-        pytest.fail(fail_message, pytrace=False)
+        raise SandboxStartupFailed(fail_message)
 
     elif response_status == ProcessStatusCode.TIMEOUT:
-        pytest.fail("Student code initialization timed out", pytrace=False)
+        raise SandboxStartupFailed("Student code initialization timed out")
 
     elif response_status == ProcessStatusCode.NO_RESPONSE:
-        pytest.fail(f"No response from initialization with timeout {initialization_timeout}", pytrace=False)
+        raise SandboxStartupFailed(f"No response from initialization with timeout {initialization_timeout}")
 
     elif response_status != ProcessStatusCode.SUCCESS:
         logger.warning(f"Unexpected status in response from student code server: {response}")
@@ -457,6 +510,7 @@ def _initialize_workspace_fixture(
 
     config_dict: dict[str, Any] = {}
     exec_entry: str | None = None
+    helper_module_names: list[str] | None = None
     if hasattr(request, "module") and hasattr(request.module, "autograder_config"):
         config_object = request.module.autograder_config
         if not isinstance(config_object, ConfigObject):
@@ -465,6 +519,7 @@ def _initialize_workspace_fixture(
         initialization_timeout = config_object.sandbox_timeout
         config_starting_vars = config_object.starting_vars
         exec_entry = config_object.workspace_exec_entry
+        helper_module_names = config_object.helper_modules
     else:
         if hasattr(request, "module") and hasattr(request.module, "sandbox_timeout"):
             initialization_timeout = request.module.sandbox_timeout
@@ -510,6 +565,7 @@ def _initialize_workspace_fixture(
         names_for_user_list=names_for_user_list,
         worker_username=request.config.getoption("--worker-username"),
         exec_entry=exec_entry,
+        helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
     )
     return fixture, initialization_timeout
 
@@ -926,7 +982,12 @@ class ResultCollectorPlugin:
 
                 logger.debug(f"Grading output level set to: {output_level}")
 
-                if output_level == GradingOutputLevel.Friendly:
+                if isinstance(call.excinfo.value, SandboxStartupFailed):
+                    # The sandbox startup handler already formatted this message for the
+                    # output level, so show it in full without another exception header.
+                    feedback_obj.add_message(str(call.excinfo.value))
+
+                elif output_level == GradingOutputLevel.Friendly:
                     # Friendly mode: show only the exception message text with
                     # no exception class name, traceback, or "failed with" prefix.
                     exception_message = str(call.excinfo.value)
