@@ -1510,7 +1510,11 @@ autograder_config = ConfigObject(
 
 - The default `import_blacklist` (`["os", "sys", "subprocess", "pathlib", "shutil"]`) is
   applied in workspace mode too. If the student's project legitimately uses `pathlib` for
-  internal file operations, add it to `import_whitelist` explicitly.
+  internal file operations, set `import_blacklist` to a list without it. Adding it to
+  `import_whitelist` doesn't help, because the blacklist is checked first.
+- `import_whitelist` and `import_blacklist` apply to imports in the student's project, setup code
+  and the entry point. They don't apply to imports made inside library code, so an allowed library
+  such as `numpy` or `pandas` can still load `os` and its other dependencies.
 - `sys.path` inside the subprocess is modified to include `workspace_student_dir`, so all
   relative imports within the project work naturally.
 - Each call to `workspace_sandbox.query_function` runs in the same subprocess, so module-level

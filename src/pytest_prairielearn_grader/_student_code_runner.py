@@ -188,7 +188,8 @@ def get_custom_importer(
     When *workspace_dir* is given, any module whose top-level package name resolves to a file or
     directory inside that directory is unconditionally allowed, so that student modules can import
     each other without instructors needing to maintain a manual whitelist of their own files.
-    Relative imports (level > 0) are always permitted for the same reason.
+    Relative imports (level > 0) are always permitted for the same reason. Imports made by library
+    modules outside that directory aren't restricted, so an allowed library can load what it needs.
     """
 
     original_import = _REAL_IMPORT
@@ -212,6 +213,17 @@ def get_custom_importer(
         # Relative imports are always intra-package and allowed.
         if level > 0:
             return original_import(name, globals, locals, fl, level)
+
+        # In workspace mode this importer replaces builtins.__import__ for the whole process, so it
+        # also sees imports made inside libraries, such as numpy's own `import os`. The rules are
+        # for student code, so let through imports made by a module file outside the workspace.
+        # Code with no module file, such as setup code and the entry point, is still restricted.
+        # The caller's frame is used rather than the globals argument, because some libraries call
+        # __import__ directly without one (pandas does for its dependencies).
+        if _ws_str is not None:
+            importer_file = sys._getframe(1).f_globals.get("__file__")
+            if isinstance(importer_file, str) and not importer_file.startswith(_ws_str + os.sep):
+                return original_import(name, globals, locals, fl, level)
 
         # Workspace-local modules are always importable regardless of whitelist/blacklist.
         # A module is considered local if its top-level package maps to a file or directory
