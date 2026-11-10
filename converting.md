@@ -18,6 +18,45 @@ Converted questions in the PrairieLearn example course are good references:
 | `autograder/codeEditor`                          | A function question                                           |
 | `annotated/MarkovChainGroupActivity/*`           | Notebook workspaces, `helper_modules`, `data_files`           |
 
+## Where code belongs
+
+Legacy questions often run grading code next to the student's code, in `leading_code.py`,
+`trailing_code.py` and `setup_code.py`. In this grader, keep as much as possible in
+`test_student.py`, where each test runs it on its own and controls the feedback. A converted
+question should usually have only `test_student.py`, and `setup_code.py` only when student code
+needs something from it.
+
+When you convert a question, move each piece of code to the first place in this table that works:
+
+| Code                                                              | Where to put it                                                                                                                                                                 |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Expected values and reference solutions                           | The test                                                                                                                                                                        |
+| Calls to the student's functions, often in `trailing_code.py`     | `sandbox.query_function` in the test                                                                                                                                            |
+| Inputs to the student's functions, including random ones          | The test, passed as arguments. Use `@pytest.mark.parametrize` for several inputs.                                                                                               |
+| Variables that student code reads and that `server.py` randomizes | `data["params"]` in `server.py`, listed in `names_for_user`. Tests read them from the `data_json` fixture. This works for plain JSON values, not ones stored with `pl.to_json`. |
+| Fixed variables that student code reads                           | `starting_vars` in the `ConfigObject`, listed in `names_for_user`                                                                                                               |
+| Variables that student code reads and that need Python to build   | `setup_code.py`, such as numpy arrays or values decoded with `__from_server_json`                                                                                               |
+| Blocking a library function                                       | `setup_code.py`. To block a whole module, use `import_blacklist` instead.                                                                                                       |
+| Imports or definitions that the student's code relies on          | The starter code in `initial_code.py`, so that the student sees them. Use `helper_modules` for a module the student imports. Keep `leading_code.py` only when neither works.    |
+
+Why this matters:
+
+- **Trailing code runs when the sandbox starts.** If it calls a student function that raises, every
+  test fails with the same error, including tests of other functions. When a test calls the function
+  with `query_function`, only that test fails, and the message names the function.
+- **Setup code runs again for each test**, in the sandbox, with the same restrictions as student
+  code. Random values in it change between tests, and errors in it are reported as if the student's
+  code failed.
+- **Leading code is hidden.** The student's file only works with code they can't see, so it behaves
+  differently when they run it in a workspace or on their own computer.
+- **Values in `data["params"]`** are the same in every test and match what `question.html` shows,
+  and tests can read them without starting a sandbox.
+
+Don't change what the student has to write to make this work. If the student's task is to set
+variables at the top level, keep it that way, and read the variables with `sandbox.query`. If
+students have already submitted to the question, check that removing `leading_code.py` doesn't break
+those submissions when they're regraded.
+
 ## 1. Check whether the question can be converted
 
 Read every file in the question, including `info.json`, `question.html`, `server.py` and everything in
@@ -47,9 +86,9 @@ Read every file in the question, including `info.json`, `question.html`, `server
 | `question.html`          | Change the file editor's `file-name` to `student_code.py`, or keep it and set `student_code_pattern`.                   |
 | `tests/test.py`          | Replace with `tests/test_student.py`. See [Rewrite the tests](#3-rewrite-the-tests).                                    |
 | `tests/ans.py`           | Delete it. Compute expected values in `test_student.py`. Don't leave a reference solution in `tests/`.                  |
-| `tests/setup_code.py`    | Keep it if it's needed, and update it. See [Update the setup code](#4-update-the-setup-code).                           |
-| `tests/leading_code.py`  | Keep it. It's prepended to the student's code, as before.                                                               |
-| `tests/trailing_code.py` | Keep it. It's appended to the student's code, as before.                                                                |
+| `tests/setup_code.py`    | Move what you can out of it, then delete it or update it. See [Update the setup code](#4-update-the-setup-code).        |
+| `tests/leading_code.py`  | Move its code to the starter code or `helper_modules`, and delete it. See [Where code belongs](#where-code-belongs).    |
+| `tests/trailing_code.py` | Move its code into the tests and delete it. See [Where code belongs](#where-code-belongs).                              |
 | `tests/initial_code.py`  | Keep it. The grader doesn't read it. Fix starter code that doesn't parse (see below).                                   |
 | `server.py`              | Usually unchanged.                                                                                                      |
 
@@ -197,7 +236,13 @@ Pick assertions with that in mind:
 
 ## 4. Update the setup code
 
-Setup code runs inside the sandbox, so some things that worked in the legacy grader don't:
+First, move what you can out of the setup code, as described in [Where code belongs](#where-code-belongs):
+
+- Values that only tests use go in `test_student.py`.
+- Random variables that student code reads go in `server.py`, if they're plain JSON values.
+- Fixed variables that student code reads go in `starting_vars`.
+
+If nothing is left, delete `setup_code.py`. Otherwise, update what's left. Setup code runs inside the sandbox, so some things that worked in the legacy grader don't:
 
 - **Parameters.** `data` isn't defined. Use `__data_params`, which is `data["params"]`. Values that
   `server.py` stored with `pl.to_json` arrive still encoded: decode them with
@@ -225,9 +270,6 @@ params-name="names_for_user">` in `question.html`. If the question defines these
 
   la.inv = not_allowed
   ```
-
-If the setup code only defined values that tests need, and student code doesn't use them, move that
-code into `test_student.py` and delete `setup_code.py`.
 
 ## 5. Configure the grader
 
@@ -272,7 +314,8 @@ For questions where students submit a Jupyter notebook from a workspace:
 - Set `sandbox_timeout=15` if the notebook imports numpy or similar libraries.
 - Notebook questions use the normal `sandbox` fixture, not `workspace_mode`.
 - The grader runs the graded cells as a script, so anything a graded cell needs must be defined in
-  a graded cell or in `leading_code.py`.
+  a graded cell. Tag the cells with the notebook's imports `#grade`. Use `leading_code.py` only
+  when students already have copies of the notebook that you can't change.
 - If the notebook reads a data file, list it in `data_files`. If the notebook imports a `.py` file
   that's in the workspace, copy that file into `tests/` and list it in `helper_modules`.
 
