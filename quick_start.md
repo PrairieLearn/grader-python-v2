@@ -1374,7 +1374,7 @@ def test_result_variable(sandbox: StudentFixture, feedback: FeedbackFixture) -> 
 
 In production PrairieLearn, the submitted `gradedFiles` end up in `/grade/student/`. The grader
 searches for matching files there automatically. For local development, place the notebook in the
-scenario data directory next to your test file:
+tests folder next to your test file (the folder named after it):
 
 ```
 questions/my_notebook_question/
@@ -1435,7 +1435,7 @@ questions/my_workspace_question/
 └── tests/
     ├── test_student.py        # your test file
     ├── setup_code.py          # (optional)
-    └── test_student/          # ← mirrors the data directory layout
+    └── test_student/          # ← mirrors the tests folder layout
         └── student/           # ← local stand-in for /grade/student
             ├── calculator.py
             └── utils/

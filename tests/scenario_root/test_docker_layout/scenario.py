@@ -1,7 +1,7 @@
 """
 Tests that the autograder correctly handles the Docker production layout, where
 run.sh places the student submission directory inside 'student/' rather than
-scattering files at the data directory root.
+scattering files at the tests folder root.
 
 Resulting directory structure (mirrors what run.sh produces):
 
