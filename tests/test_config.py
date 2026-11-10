@@ -333,7 +333,7 @@ def test_data_files_not_in_params() -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["", " ", ".", "..", "../ans.py", "data/../x.txt", "./a.txt", "/grade/tests/a.txt", "a//b", "data/", "a\\b", 5, None],
+    ["", " ", ".", "./", "..", "../ans.py", "data/../x.txt", "/grade/tests/a.txt", "a\\b", "..\\a.txt", "C:a.txt", "C:/a.txt", 5, None],
 )
 def test_data_files_rejects_invalid_paths(name: object) -> None:
     with pytest.raises(ValueError, match="data_files must contain relative paths"):
@@ -350,6 +350,12 @@ def test_data_files_cannot_be_empty() -> None:
         ConfigObject(data_files=[])
 
 
-def test_data_files_rejects_duplicates() -> None:
+def test_data_files_normalizes_paths() -> None:
+    # "/" is the separator on every OS, and "." and repeated "/" parts are dropped.
+    assert ConfigObject(data_files=["./a.txt", "data//b.txt"]).data_files == ["./a.txt", "data//b.txt"]
+
+
+@pytest.mark.parametrize("names", [["a.txt", "a.txt"], ["a.txt", "./a.txt"], ["data/b.txt", "data//b.txt"]])
+def test_data_files_rejects_duplicates(names: list[str]) -> None:
     with pytest.raises(ValueError, match="more than once"):
-        ConfigObject(data_files=["a.txt", "a.txt"])
+        ConfigObject(data_files=names)

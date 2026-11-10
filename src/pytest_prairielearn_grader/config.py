@@ -3,14 +3,23 @@
 import keyword
 from dataclasses import dataclass
 from dataclasses import field
+from pathlib import PurePosixPath
+from pathlib import PureWindowsPath
 from typing import Any
 from typing import Literal
 
 
 def _is_plain_relative_path(name: str) -> bool:
-    """Whether name is a relative file path with no '..', '.', empty or backslash parts."""
-    # An empty part also rules out absolute paths, "a//b" and a trailing "/".
-    return bool(name.strip()) and "\\" not in name and all(part not in ("", ".", "..") for part in name.split("/"))
+    """Whether name is a relative path to a file that stays inside the folder it's resolved against.
+
+    Entries always use "/", whatever the OS, so a config means the same thing on every machine.
+    Backslashes and drives are rejected because on Windows they'd be a separator or an anchor.
+    """
+    if not name.strip() or "\\" in name or PureWindowsPath(name).drive:
+        return False
+    path = PurePosixPath(name)
+    # PurePosixPath drops "." and empty parts, so "." and "" have no parts left.
+    return not path.is_absolute() and bool(path.parts) and ".." not in path.parts
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -297,7 +306,7 @@ class ConfigObject:
             for file_name in self.data_files:
                 if not isinstance(file_name, str) or not _is_plain_relative_path(file_name):
                     raise ValueError(f"data_files must contain relative paths inside the tests folder, without '..', got: {file_name!r}")
-            if len(set(self.data_files)) != len(self.data_files):
+            if len({PurePosixPath(name) for name in self.data_files}) != len(self.data_files):
                 raise ValueError(f"data_files lists the same file more than once: {self.data_files!r}")
 
         # Validate builtin_whitelist contains non-empty strings
