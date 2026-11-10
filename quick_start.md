@@ -198,7 +198,7 @@ in the first place in this table that works:
 | Variables that student code reads and that `server.py` randomizes | `data["params"]` in `server.py`, listed in `names_for_user`. Tests read them from the `data_json` fixture. This works for plain JSON values, not ones stored with `pl.to_json`. |
 | Fixed variables that student code reads                           | `starting_vars` in the `ConfigObject`, listed in `names_for_user`                                                                                                               |
 | Variables that student code reads and that need Python to build   | `setup_code.py`, such as numpy arrays or values decoded with `__from_server_json`                                                                                               |
-| Blocking a library function                                       | `setup_code.py`. To block a whole module, use `import_blacklist` instead.                                                                                                       |
+| Blocking a library function                                       | [`import_blacklist`](#blocking-functions), such as `["numpy.linalg.inv"]`                                                                                                       |
 | Imports or definitions that the student's code relies on          | The starter code, so that the student sees them. Use `helper_modules` for a module the student imports. Use `leading_code.py` only when neither works.                          |
 
 Why:
@@ -718,17 +718,12 @@ autograder_config = ConfigObject(starting_vars={"threshold": 5.0}, names_for_use
 
 ### Setup Code (`setup_code.py`)
 
-Use setup code when a value needs Python to build, such as a numpy array, or to block library
-functions. It runs in the sandbox before the student's code:
+Use setup code when a value needs Python to build, such as a numpy array. It runs in the sandbox
+before the student's code:
 
 ```python
 import numpy as np
 import numpy.linalg as la
-
-
-def not_allowed(*args, **kwargs):
-    raise RuntimeError("Usage of this function is not allowed in this question.")
-
 
 n = np.random.randint(4, 16)
 
@@ -737,13 +732,11 @@ X = la.qr(np.random.random_sample((n, n)))[0]
 D = np.diag(np.random.random_sample(n) * 10 + 1)
 A = X.T @ D @ X
 b = np.random.random(n)
-
-la.inv = not_allowed
-la.pinv = not_allowed
 ```
 
-With `names_for_user` set to `A`, `b` and `n`, student code gets those three variables, and its
-`la.inv` raises an error.
+With `names_for_user` set to `A`, `b` and `n`, student code gets those three variables. To stop
+students from calling a library function such as `la.inv`, use
+[`import_blacklist`](#blocking-functions) rather than setup code.
 
 - **Parameters.** `__data_params` holds `data["params"]`. Values that `server.py` stored with
   `pl.to_json` are still encoded: decode them with `__from_server_json`, for example
@@ -807,7 +800,7 @@ All parameters are optional:
 | `starting_vars`            | `{}`                                               | Values for names in `names_for_user`.                                                                                                      |
 | `student_code_pattern`     | `"student_code*.py"`                               | Glob pattern for the student's file.                                                                                                       |
 | `import_whitelist`         | `None`                                             | Modules that code in the sandbox may import. `None` allows all. See [Import Control](#import-control).                                     |
-| `import_blacklist`         | `["os", "sys", "subprocess", "pathlib", "shutil"]` | Modules that code in the sandbox may not import.                                                                                           |
+| `import_blacklist`         | `["os", "sys", "subprocess", "pathlib", "shutil"]` | Modules and functions that code in the sandbox may not use. See [Blocking Functions](#blocking-functions).                                 |
 | `builtin_whitelist`        | `None`                                             | Builtins to allow beyond the safe defaults. See [Builtin Function Control](#builtin-function-control).                                     |
 | `helper_modules`           | `None`                                             | Modules from the tests folder that can be imported. See [Helper Modules](#helper-modules).                                                 |
 | `data_files`               | `None`                                             | Files from the tests folder that code in the sandbox can read by relative path. See [Data Files](#data-files).                             |
@@ -1135,6 +1128,40 @@ def my_function():
 A blacklisted module also blocks its submodules, however they're imported. With `"os"` in the blacklist, `import os.path` is blocked as well as `import os`. With `"matplotlib.pyplot"`, both `import matplotlib.pyplot` and `from matplotlib import pyplot` are blocked, but `import matplotlib` still works.
 
 The blacklist only checks import statements, so it isn't a security boundary. For example, modules that student code is allowed to import can expose `os` as an attribute.
+
+#### Blocking Functions
+
+To stop students from using one library function, such as `numpy.linalg.inv` in a question about
+solving linear systems, add the function to `import_blacklist`:
+
+```python
+autograder_config = ConfigObject(
+    import_blacklist=["os", "sys", "subprocess", "pathlib", "shutil", "numpy.linalg.inv", "numpy.linalg.pinv"],
+    sandbox_timeout=15,
+)
+```
+
+Setting `import_blacklist` replaces the default list, so keep its entries.
+
+Before setup code runs, the sandbox replaces each listed function in its module with one that
+raises an error. So `np.linalg.inv(A)` and `la.inv(A)` raise
+`RuntimeError: 'numpy.linalg.inv' is blacklisted and cannot be used.`, and
+`from numpy.linalg import inv` raises an `ImportError`. This is the preferred way to block a
+function: don't override it in setup code.
+
+- **Which entries:** an entry is treated as a function when the part before its last dot is a module
+  that can be imported and the last part is a callable that isn't a module. Other entries, such as
+  `"os"` or `"matplotlib.pyplot"`, block imports as described above. If the module isn't installed
+  in the image, the entry does nothing.
+- **Setup code and helper modules** can't call the function either, because they share the
+  sandbox's modules. Compute values that need it in the test instead.
+- **Startup time:** the function's module is imported when the sandbox starts, even if the student's
+  code doesn't use it.
+- **Not a security boundary:** the function can still be reached under another name, such as
+  numpy's internal `numpy.linalg._linalg.inv`.
+
+> **Note:** blocking functions needs a grader release that includes
+> [PrairieLearn/grader-python-v2#39](https://github.com/PrairieLearn/grader-python-v2/pull/39).
 
 #### Builtin Function Control
 
@@ -1703,7 +1730,7 @@ imported normally. The list of loaded modules can change between Python versions
 | `workspace_exec_entry`  | `str \| None`       | `None`       | Relative path (from workspace root) to an entry-point file to `exec` at startup.                              |
 | `sandbox_timeout`       | `float`             | `1.0`        | Timeout for sandbox startup (increase for larger projects).                                                   |
 | `import_whitelist`      | `list[str] \| None` | `None`       | Allowed imports. `None` = allow all.                                                                          |
-| `import_blacklist`      | `list[str] \| None` | default list | Blocked imports.                                                                                              |
+| `import_blacklist`      | `list[str] \| None` | default list | Blocked imports and functions.                                                                                |
 | `helper_modules`        | `list[str] \| None` | `None`       | Modules from the tests folder to make importable. See [Helper Modules](#helper-modules).                      |
 
 ### Production vs. Local Development

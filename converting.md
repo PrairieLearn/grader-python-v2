@@ -182,22 +182,22 @@ regrade of a variant, and `question.html` could show it with `{{params.x}}`.
 
 ### API mapping
 
-| Legacy                                             | pytest grader                                                                                       |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `class Test(PLTestCase)` with `test_*` methods     | Module-level `test_*` functions that take the `sandbox` fixture                                     |
-| `@points(10)` and `@name("...")`                   | `@pytest.mark.grading_data(name="...", points=10)`                                                  |
-| Tests run in sorted name order                     | Tests run in file order                                                                             |
-| `self.st.x`                                        | `sandbox.query("x")`                                                                                |
-| `Feedback.call_user(self.st.f, a, b)`              | `sandbox.query_function("f", a, b)`, or `query_function_raw` to inspect exceptions and timeouts     |
-| `self.ref.x` from `ans.py`                         | Compute the expected value in the test                                                              |
-| A setup variable, such as `x` from `setup_code.py` | `sandbox.query_setup("x")`                                                                          |
-| `self.data["params"]["k"]`                         | The `data_json` fixture: `data_json["params"]["k"]`                                                 |
-| `Feedback.set_score(s)`                            | `feedback.set_score(s)` with the `feedback` fixture. See [Scoring](#scoring).                       |
-| `Feedback.add_feedback("...")`                     | `feedback.add_message("...")`                                                                       |
-| `accuracy_critical=True`                           | A failed assertion ends the test. Other tests still run.                                            |
-| `total_iters = 3` and `@not_repeated`              | `@pytest.mark.parametrize` over the inputs, or a loop with partial credit                           |
-| `Feedback.not_allowed`                             | Define your own function in `setup_code.py`. See [Update the setup code](#4-update-the-setup-code). |
-| `repeated_setup()`                                 | Not needed: setup code runs again for each sandbox.                                                 |
+| Legacy                                             | pytest grader                                                                                                         |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `class Test(PLTestCase)` with `test_*` methods     | Module-level `test_*` functions that take the `sandbox` fixture                                                       |
+| `@points(10)` and `@name("...")`                   | `@pytest.mark.grading_data(name="...", points=10)`                                                                    |
+| Tests run in sorted name order                     | Tests run in file order                                                                                               |
+| `self.st.x`                                        | `sandbox.query("x")`                                                                                                  |
+| `Feedback.call_user(self.st.f, a, b)`              | `sandbox.query_function("f", a, b)`, or `query_function_raw` to inspect exceptions and timeouts                       |
+| `self.ref.x` from `ans.py`                         | Compute the expected value in the test                                                                                |
+| A setup variable, such as `x` from `setup_code.py` | `sandbox.query_setup("x")`                                                                                            |
+| `self.data["params"]["k"]`                         | The `data_json` fixture: `data_json["params"]["k"]`                                                                   |
+| `Feedback.set_score(s)`                            | `feedback.set_score(s)` with the `feedback` fixture. See [Scoring](#scoring).                                         |
+| `Feedback.add_feedback("...")`                     | `feedback.add_message("...")`                                                                                         |
+| `accuracy_critical=True`                           | A failed assertion ends the test. Other tests still run.                                                              |
+| `total_iters = 3` and `@not_repeated`              | `@pytest.mark.parametrize` over the inputs, or a loop with partial credit                                             |
+| `Feedback.not_allowed`                             | `import_blacklist=["numpy.linalg.inv"]` in the `ConfigObject`. See [Update the setup code](#4-update-the-setup-code). |
+| `repeated_setup()`                                 | Not needed: setup code runs again for each sandbox.                                                                   |
 
 ### Checks
 
@@ -252,6 +252,7 @@ First, move what you can out of the setup code, as described in [Where code belo
 - Values that only tests use go in `test_student.py`.
 - Random variables that student code reads go in `server.py`, if they're plain JSON values.
 - Fixed variables that student code reads go in `starting_vars`.
+- Functions that the setup code blocks, such as `la.inv = not_allowed`, go in `import_blacklist`.
 
 If nothing is left, delete `setup_code.py`. Otherwise, update what's left. Setup code runs inside the sandbox, so some things that worked in the legacy grader don't:
 
@@ -269,18 +270,19 @@ params-name="names_for_user">` in `question.html`. If the question defines these
   test, so random values in setup code change between tests. Read them with `sandbox.query_setup` in
   the same test that uses them. Don't compute expected values from random setup
   values at module level.
-- **Disallowed functions.** `Feedback` isn't available. Define a replacement in setup code:
+- **Disallowed functions.** `Feedback.not_allowed` isn't available. Instead of overriding the
+  function in setup code, list it in `import_blacklist`, which blocks it however student code
+  reaches it. The default blacklist is replaced, so keep its entries:
 
   ```python
-  import numpy.linalg as la
-
-
-  def not_allowed(*args, **kwargs):
-      raise RuntimeError("Usage of this function is not allowed in this question.")
-
-
-  la.inv = not_allowed
+  autograder_config = ConfigObject(
+      import_blacklist=["os", "sys", "subprocess", "pathlib", "shutil", "numpy.linalg.inv"],
+      sandbox_timeout=15,
+  )
   ```
+
+  See [Blocking Functions](quick_start.md#blocking-functions). If the setup code computed a value
+  with the blocked function, compute it in the test instead.
 
 ## 5. Configure the grader
 
