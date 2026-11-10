@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -34,6 +35,13 @@ DataFixture = dict[str, Any]
 
 SCRIPT_PATH = str(files("pytest_prairielearn_grader").joinpath("_student_code_runner.py"))
 DEFAULT_TIMEOUT = 1.0
+
+# Modes for the data files folder (see _make_data_files_dir). Everyone can read the files and list the
+# folders, and nobody can change them; only the owner (root, in the Docker image) can make them writable again.
+_READ_ONLY_FILE_MODE = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH  # r--r--r--
+_READ_ONLY_DIR_MODE = _READ_ONLY_FILE_MODE | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH  # r-xr-xr-x
+# Lets the owner delete the folder's contents at cleanup.
+_OWNER_WRITABLE_DIR_MODE = _READ_ONLY_DIR_MODE | stat.S_IWUSR  # rwxr-xr-x
 
 logger = logging.getLogger(__name__)
 
@@ -90,9 +98,9 @@ def _make_data_files_dir(data_files: dict[str, Path]) -> Path:
             destination = root / relative_path
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, destination)
-            destination.chmod(0o444)
+            destination.chmod(_READ_ONLY_FILE_MODE)
         for directory in [root, *(path for path in root.rglob("*") if path.is_dir())]:
-            directory.chmod(0o555)
+            directory.chmod(_READ_ONLY_DIR_MODE)
     except BaseException:
         _remove_data_files_dir(root)
         raise
@@ -101,7 +109,7 @@ def _make_data_files_dir(data_files: dict[str, Path]) -> Path:
 
 def _remove_data_files_dir(root: Path) -> None:
     for directory in [root, *(path for path in root.rglob("*") if path.is_dir())]:
-        directory.chmod(0o755)
+        directory.chmod(_OWNER_WRITABLE_DIR_MODE)
     shutil.rmtree(root, ignore_errors=True)
 
 
