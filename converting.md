@@ -5,52 +5,34 @@ This guide explains how to convert a PrairieLearn question from the legacy Pytho
 (`prairielearn/grader-python-pytest`). It's written so that you can give it to a person or an AI
 coding agent and have them do the conversion from start to finish.
 
-[quick_start.md](quick_start.md) documents every feature in detail. This guide covers what changes,
-in what order to do it, and the differences that are easy to miss.
+[quick_start.md](quick_start.md) shows how to write a question for this grader and documents its
+full API. This guide covers only what's specific to converting: what changes, in what order to do
+it, and the differences from the legacy grader that are easy to miss.
 
 Converted questions in the PrairieLearn example course are good references:
 
-| Question (under `exampleCourse/questions/demo/`) | Shows                                                         |
-| ------------------------------------------------ | ------------------------------------------------------------- |
-| `autograder/python/square`                       | `setup_code.py`, `query_setup`, a scalar with a tolerance     |
-| `autograder/python/pandas`                       | Checking a DataFrame                                          |
-| `autograder/python/randomFunctionName`           | `server.py` parameters, `data_json`, partial credit, timeouts |
-| `autograder/codeEditor`                          | A function question                                           |
-| `annotated/MarkovChainGroupActivity/*`           | Notebook workspaces, `helper_modules`, `data_files`           |
+| Question (under `exampleCourse/questions/demo/`) | Shows                                                                                      |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| `autograder/python/square`                       | A scalar with a tolerance. It still keeps `x` in `setup_code.py`, unlike the version below |
+| `autograder/python/pandas`                       | Checking a DataFrame                                                                       |
+| `autograder/python/randomFunctionName`           | `server.py` parameters, `data_json`, partial credit, timeouts                              |
+| `autograder/codeEditor`                          | A function question                                                                        |
+| `annotated/MarkovChainGroupActivity/*`           | Notebook workspaces, `helper_modules`, `data_files`                                        |
 
 ## Where code belongs
 
 Legacy questions often run grading code next to the student's code, in `leading_code.py`,
-`trailing_code.py` and `setup_code.py`. In this grader, keep as much as possible in
-`test_student.py`, where each test runs it on its own and controls the feedback. A converted
-question should usually have only `test_student.py`, and `setup_code.py` only when student code
-needs something from it.
+`trailing_code.py` and `setup_code.py`. Don't carry that over. Follow
+[Where Code Belongs](quick_start.md#where-code-belongs), which says where each kind of code goes in
+this grader and why. A converted question should usually have only `initial_code.py` and
+`test_student.py`, plus `setup_code.py` only when student code needs something from it:
 
-When you convert a question, move each piece of code to the first place in this table that works:
-
-| Code                                                              | Where to put it                                                                                                                                                                 |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Expected values and reference solutions                           | The test                                                                                                                                                                        |
-| Calls to the student's functions, often in `trailing_code.py`     | `sandbox.query_function` in the test                                                                                                                                            |
-| Inputs to the student's functions, including random ones          | The test, passed as arguments. Use `@pytest.mark.parametrize` for several inputs.                                                                                               |
-| Variables that student code reads and that `server.py` randomizes | `data["params"]` in `server.py`, listed in `names_for_user`. Tests read them from the `data_json` fixture. This works for plain JSON values, not ones stored with `pl.to_json`. |
-| Fixed variables that student code reads                           | `starting_vars` in the `ConfigObject`, listed in `names_for_user`                                                                                                               |
-| Variables that student code reads and that need Python to build   | `setup_code.py`, such as numpy arrays or values decoded with `__from_server_json`                                                                                               |
-| Blocking a library function                                       | `setup_code.py`. To block a whole module, use `import_blacklist` instead.                                                                                                       |
-| Imports or definitions that the student's code relies on          | The starter code in `initial_code.py`, so that the student sees them. Use `helper_modules` for a module the student imports. Keep `leading_code.py` only when neither works.    |
-
-Why this matters:
-
-- **Trailing code runs when the sandbox starts.** If it calls a student function that raises, every
-  test fails with the same error, including tests of other functions. When a test calls the function
-  with `query_function`, only that test fails, and the message names the function.
-- **Setup code runs again for each test**, in the sandbox, with the same restrictions as student
-  code. Random values in it change between tests, and errors in it are reported as if the student's
-  code failed.
-- **Leading code is hidden.** The student's file only works with code they can't see, so it behaves
-  differently when they run it in a workspace or on their own computer.
-- **Values in `data["params"]`** are the same in every test and match what `question.html` shows,
-  and tests can read them without starting a sandbox.
+- **`ans.py`**: compute the expected values in the tests.
+- **`trailing_code.py`**: call the student's functions from the tests with `query_function`.
+- **`leading_code.py`**: move imports and definitions to the starter code, or to `helper_modules`.
+- **`setup_code.py`**: move random plain values to `server.py`, fixed values to `starting_vars` and
+  values that only tests use to the tests. Keep what's left, such as numpy arrays and blocked
+  functions.
 
 Don't change what the student has to write to make this work. If the student's task is to set
 variables at the top level, keep it that way, and read the variables with `sandbox.query`. If
@@ -122,10 +104,30 @@ Each `test_*` method on the legacy `Test` class becomes a `test_*` function in
 `tests/test_student.py`. Keep each test's name, points and order, and keep checking the same things
 with the same tolerances. Don't make the question easier or harder.
 
-Here's the `square` question before and after:
+Here's the `square` question, which asks students to set `x_sq` to the square of a random `x`.
+The legacy version has four files in `tests/`:
 
 ```python
-# Legacy tests/test.py
+# tests/setup_code.py
+import random
+
+x = random.random()
+```
+
+```python
+# tests/ans.py
+x_sq = x**2
+```
+
+```python
+# tests/initial_code.py
+import numpy as np
+
+x_sq = # fill in this code here...
+```
+
+```python
+# tests/test.py
 class Test(PLTestCaseWithPlot):
     @points(10)
     @name("x_sq")
@@ -136,20 +138,47 @@ class Test(PLTestCaseWithPlot):
             Feedback.set_score(0)
 ```
 
+Converted, following [Where code belongs](#where-code-belongs):
+
+- `x` is a plain random value that student code reads, so `server.py` generates it instead of
+  `setup_code.py`. `question.html` already lists `x` in
+  `<pl-external-grader-variables params-name="names_for_user">`, so student code still gets it.
+- The expected value comes from the test, so `ans.py` is deleted.
+- The starter code parses, so an unchanged submission gets 0 points with feedback.
+- `question.html` changes `file-name="user_code.py"` to `file-name="student_code.py"`, and
+  `info.json` changes the image to `prairielearn/grader-python-pytest:lite`.
+
+```python
+# server.py
+import random
+
+
+def generate(data):
+    data["params"]["x"] = random.random()
+```
+
+```python
+# tests/initial_code.py
+x_sq = 0  # fill in this code here...
+```
+
 ```python
 # tests/test_student.py
 import pytest
 from pytest_prairielearn_grader.assertions import assert_approx_equal
 from pytest_prairielearn_grader.fixture import StudentFixture
-from pytest_prairielearn_grader.utils import GradingOutputLevel
+
+pytestmark = pytest.mark.output(level="friendly")
 
 
-@pytest.mark.output(level=GradingOutputLevel.Friendly)
 @pytest.mark.grading_data(name="x_sq", points=10)
-def test_x_sq(sandbox: StudentFixture) -> None:
-    x = sandbox.query_setup("x")
+def test_x_sq(sandbox: StudentFixture, data_json: dict) -> None:
+    x = data_json["params"]["x"]
     assert_approx_equal(sandbox.query("x_sq"), x**2, description="x_sq")
 ```
+
+The converted question has no `setup_code.py`. `x` is now the same in every test and every
+regrade of a variant, and `question.html` could show it with `{{params.x}}`.
 
 ### API mapping
 
@@ -180,24 +209,13 @@ or with numpy and pandas functions wrapped in `assert_true`:
 | `check_scalar(name, ref, st)`               | `assert_approx_equal(value, expected, description=name)`, keeping `rtol=1e-5, atol=1e-8` unless the test set others |
 | Exact comparisons                           | `assert_equal(value, expected, description=name)`                                                                   |
 | `call_user` plus a comparison               | `assert_fn_equal(sandbox, "f", args=(...), expected=...)` or `assert_fn_approx_equal`                               |
-| `check_numpy_array_allclose(name, ref, st)` | The four array checks below                                                                                         |
-| `check_numpy_array_features(name, ref, st)` | The first three array checks below                                                                                  |
+| `check_numpy_array_allclose(name, ref, st)` | The four [array checks](quick_start.md#hiding-expected-values) on type, dtype, shape and values                     |
+| `check_numpy_array_features(name, ref, st)` | The first three of those array checks                                                                               |
 | `check_list(name, ref, st, entry_type=T)`   | `assert_true(isinstance(value, list), ...)`, a length check and an `isinstance` check on each entry                 |
 | `check_tuple`, `check_dict`                 | `assert_equal`                                                                                                      |
 | `check_dataframe(name, ref, st)`            | `pandas.testing.assert_frame_equal(expected, df, check_like=True)`, as in the `pandas` example question             |
 
-For a numpy array, check the type, dtype, shape and values in that order, so that each failure has a
-clear message and a wrong shape doesn't reach `np.allclose`:
-
-```python
-value = sandbox.query("x")
-assert_true(isinstance(value, np.ndarray), msg="x should be a numpy array")
-assert_true(np.issubdtype(value.dtype, np.number), msg="x should contain numbers")
-assert_true(value.shape == expected.shape, msg=f"x should have shape {expected.shape}")
-assert_true(np.allclose(value, expected, rtol=1e-5, atol=1e-8), msg="x is inaccurate")
-```
-
-`assert_approx_equal` is for scalars. Don't use it for arrays.
+Keep `check_scalar`'s default tolerances of `rtol=1e-5, atol=1e-8` unless the legacy test set others.
 
 ### Feedback messages
 
@@ -205,17 +223,10 @@ Use `@pytest.mark.output(level=GradingOutputLevel.Friendly)` on each test, as th
 do, or `output_level="friendly"` in the `ConfigObject`. At this level the student sees only the
 assertion's message.
 
-Pick assertions with that in mind:
-
-- **Bare `assert`.** Don't use it in tests. pytest rewrites it, so the student sees
-  `assert 6 == 12345` and the fixture's `repr` along with your message, which gives away the
-  expected value.
-- **numpy and pandas assertions.** `np.testing.assert_allclose` and similar include both arrays in
-  their messages. Use `assert_true(np.allclose(...), msg=...)` instead.
-- **`assert_equal` and the other comparison helpers.** These show the expected value. That's fine
-  when the legacy feedback showed it too, or when the test's inputs are visible to the student. For
-  hidden test cases, use `assert_true` with a message that doesn't include the answer.
-- **Wording.** Keep the wording of the legacy feedback where you can, such as `"x is inaccurate"`.
+Follow [Hiding Expected Values](quick_start.md#hiding-expected-values): don't use a bare `assert`
+or numpy testing functions, and use `assert_true` for hidden test cases. The comparison helpers show
+the expected value, which is fine when the legacy feedback showed it too. Keep the wording of the
+legacy feedback where you can, such as `"x is inaccurate"`.
 
 ### Scoring
 
@@ -256,7 +267,7 @@ params-name="names_for_user">` in `question.html`. If the question defines these
   else, or not at all, set `names_for_user=[...]` in the `ConfigObject`.
 - **Fresh values per test.** The `sandbox` fixture runs setup code and student code again for each
   test, so random values in setup code change between tests. Read them with `sandbox.query_setup` in
-  the same test that uses them, as `square` does. Don't compute expected values from random setup
+  the same test that uses them. Don't compute expected values from random setup
   values at module level.
 - **Disallowed functions.** `Feedback` isn't available. Define a replacement in setup code:
 
@@ -298,6 +309,7 @@ When a `ConfigObject` is present, the module-level `sandbox_timeout` variable an
 | Student code or `leading_code.py` imports a module from `tests/`      | `helper_modules=["module_name"]`. See [Helper Modules](quick_start.md#helper-modules).                                     |
 | Student code or `leading_code.py` reads a file from `tests/`          | `data_files=["file.txt"]`, and read it in tests with the `tests_dir` fixture. See [Data Files](quick_start.md#data-files). |
 | Student code imports `os`, `sys`, `subprocess`, `pathlib` or `shutil` | `import_blacklist=[...]` without that module. These are blocked by default.                                                |
+| Solutions use builtins that aren't defaults, such as `sum` or `super` | `builtin_whitelist=[...]`. See [Builtin Function Control](quick_start.md#builtin-function-control).                        |
 | The legacy setup code blocked imports or builtins                     | `import_whitelist`, `import_blacklist` or `builtin_whitelist`                                                              |
 | A multi-file workspace project with `.py` files                       | `workspace_mode=True`. See [Workspace Grading](quick_start.md#workspace-grading).                                          |
 
@@ -331,14 +343,19 @@ These differences from the legacy grader are easy to miss:
 - **Setup code runs for each test**, and so does the student's code. Output that student code prints
   at the top level appears in each test's feedback, unless the test sets
   `include_stdout_feedback=False` in `grading_data`.
+- **Restricted builtins.** Student code and setup code get only a default set of builtins, which
+  leaves out common ones such as `sum`, `any`, `all`, `type`, `getattr`, `next` and `super`. Check
+  the solution and the starter code, and add what they use to `builtin_whitelist`. A missing builtin
+  shows up as a `NameError` when you test the conversion.
 - **Default import blacklist.** `os`, `sys`, `subprocess`, `pathlib` and `shutil` are blocked unless
   you set `import_blacklist`.
 - **Syntax errors** make the submission ungradable instead of scoring 0.
 
 ## 7. Test the conversion
 
-Test the converted question with the grader image before calling the conversion done. Run each case
-in a fresh copy of the layout, because the image moves files around:
+Test the converted question with the grader image before calling the conversion done, as described
+in [Testing Locally](quick_start.md#testing-locally). Run each case in a fresh copy of the layout,
+because the image moves files around:
 
 ```bash
 mkdir -p grade/tests grade/student grade/data

@@ -1,13 +1,16 @@
 # Quick Start Guide
 
-This is a quick start guide for using the new Python autograder for PrairieLearn. This guide
-covers the basic usage and functionality with examples. The grader uses the Docker image
-`prairielearn/grader-python-pytest:latest` which is powered by the `pytest-prairielearn-grader`
+This guide shows how to write a PrairieLearn question that's graded with the pytest-based Python
+autograder, and then documents the grader's full API. The grader runs in the
+`prairielearn/grader-python-pytest` Docker images and is built on the `pytest-prairielearn-grader`
 pytest plugin.
 
-The following discussion is based on converted example questions in PrairieLearn. To convert a
-question from the legacy Python grader, follow [converting.md](converting.md), which also lists
-example questions to compare against.
+Tests are ordinary pytest test functions. Each test gets a fresh sandbox that runs the student's
+code, and the test asks the sandbox for the values and functions it wants to check. Student code
+never runs in the same process as the tests.
+
+If you're converting a question that uses the legacy `prairielearn/grader-python` image, follow
+[converting.md](converting.md) instead.
 
 ## Editor Setup
 
@@ -19,155 +22,255 @@ pip install pytest pytest-prairielearn-grader
 
 This enables IDE features like autocomplete, type checking, and inline documentation when writing test cases.
 
-## File Structure
+## Your First Question
 
-The required file structure for a PrairieLearn question using this grader is:
+This section builds a question that asks students to write a function `average(values)`. A
+question that's graded by this grader has these files:
 
 ```
-- info.json
-- question.html
-- tests/
-  ├── initial_code.py      (optional: starter code for students)
-  ├── setup_code.py        (optional: test setup and parameters)
-  ├── leading_code.py      (optional: code prepended to the student's code)
-  ├── trailing_code.py     (optional: code appended to the student's code)
-  └── test_student.py      (required: test cases)
+average/
+├── info.json
+├── question.html
+└── tests/
+    ├── initial_code.py     (starter code shown in the file editor)
+    └── test_student.py     (the tests)
 ```
 
-`leading_code.py` and `trailing_code.py` run in the same namespace as the student's code, so
-student code can use anything that `leading_code.py` defines. The grader doesn't read
-`initial_code.py`. It's only used by the file editor in `question.html`.
+### `info.json`
 
-`test_student.py` can't import the other files in `tests/`. To share code with the sandbox, see
-[Helper Modules](#helper-modules). To read a data file in a test, use the `tests_dir` fixture.
+Set `gradingMethod` to `"External"` and pick a grader image:
 
-**Important**: The file editor element in `question.html` should have `file-name="student_code.py"`.
-The autograder looks for `student_code.py` by default. You can customize this by setting
-`student_code_pattern = "your_filename.py"` at the global scope of `test_student.py`.
+```json
+{
+  "uuid": "...",
+  "title": "Average of a list",
+  "topic": "Functions",
+  "type": "v3",
+  "gradingMethod": "External",
+  "externalGradingOptions": {
+    "enabled": true,
+    "image": "prairielearn/grader-python-pytest:lite",
+    "timeout": 30
+  }
+}
+```
 
-## Setup Code (`setup_code.py`)
+### Choosing an Image
 
-The `setup_code.py` file defines variables and functions that are available to the student
-code. Only variables listed in the `names_for_user` entry in `data.json` (via the
-`pl-external-grader-variables` element) are accessible to the student.
+Two image variants are published. Pick the smallest one that includes what your question needs — a smaller image means faster cold-start pull times and a reduced security surface.
 
-### Accessing `data.json` Parameters
+| Tag       | Size (approx.) | Includes                                                                                                                                                                            | Best for                                                                                        |
+| --------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `:latest` | ~400–500 MB    | Full scientific stack: `numpy`, `pandas`, `scipy`, `matplotlib` + `matplotcheck2` + `plot-serializer`, `seaborn`, `scikit-learn`, `sympy`, `networkx`, `nltk`, `nbformat`, and more | Any course that needs scientific computing, data science, plotting, or Jupyter notebook grading |
+| `:lite`   | ~60–80 MB      | Grader core only: `pytest-prairielearn-grader`, `Pygments`, `beautifulsoup4`, `defusedxml`, `requests`                                                                              | Introductory CS courses where student code uses only the Python standard library                |
 
-Inside `setup_code.py`, you can access parameters from `data.json` via the special `__data_params` variable, which contains the `params` dict (i.e., `data.json["params"]`):
+> **Note:** If a student's code imports a package that isn't present in the image (e.g., `numpy` in `:lite`), it will raise an `ImportError` and the test will fail with an exception. Make sure the image you choose contains everything both your test code and the expected student solution require.
+
+Pinned version tags (e.g., `:v1.2.3` and `:v1.2.3-lite`) are also published alongside each release if you need a reproducible build.
+
+### `question.html`
+
+Students write their code in a file editor. The grader looks for a file named `student_code*.py`,
+so name the file `student_code.py`, or set [`student_code_pattern`](#configobject-parameters):
+
+```html
+<pl-question-panel>
+  <p>
+    Write a function <code>average(values)</code> that returns the mean of a
+    non-empty list of numbers.
+  </p>
+  <pl-file-editor
+    file-name="student_code.py"
+    ace-mode="ace/mode/python"
+    source-file-name="tests/initial_code.py"
+  ></pl-file-editor>
+</pl-question-panel>
+
+<pl-submission-panel>
+  <pl-external-grader-results></pl-external-grader-results>
+  <pl-file-preview></pl-file-preview>
+</pl-submission-panel>
+```
+
+### `tests/initial_code.py`
+
+The starter code. The grader doesn't read this file, so it's only used by the file editor. Make
+sure it parses: a submission with a syntax error is [ungradable](#ungradable-submission-detection),
+so an unchanged starter file should run and get 0 points with feedback.
 
 ```python
-# Access parameters passed from PrairieLearn
-coefficient = __data_params["coefficient"]
-matrix_size = __data_params["matrix_size"]
+def average(values):
+    return 0
 ```
 
-### Example `setup_code.py`
+### `tests/test_student.py`
+
+Each test is a function that takes the `sandbox` fixture, calls the student's code through it, and
+checks the result:
 
 ```python
-import numpy as np
-import numpy.linalg as la
-
-
-def not_allowed(*args, **kwargs):
-    raise RuntimeError("Usage of this function is not allowed in this question.")
-
-
-# Set up parameters
-n = np.random.randint(4, 16)
-
-# Generate a random full-rank matrix
-X = la.qr(np.random.random_sample((n, n)))[0]
-D = np.diag(np.random.random_sample(n) * 10 + 1)
-A = X.T @ D @ X
-
-b = np.random.random(n)
-
-# Block certain functions
-la.inv = not_allowed
-la.pinv = not_allowed
-```
-
-In this example, only `A`, `b`, and `n` (specified in `names_for_user`) are accessible in the
-student code. The function blocking demonstrates how to prevent students from using certain
-library functions.
-
-Setup code runs in the sandbox before the student's code, with the same builtins and import
-restrictions. For example, it can't call `open` or import `os`. To read a data file, list it in
-[`data_files`](#data-files). Parameters that `server.py` stored with `pl.to_json` are still encoded
-in `__data_params`. Decode them with `__from_server_json`, for example
-`A = __from_server_json(__data_params["A"])`.
-
-With the `sandbox` fixture, setup code and student code run again for each test, so random values
-in setup code differ between tests. To use a setup value in a test, read it in that test with
-[`sandbox.query_setup`](#5-query-setup-variables).
-
-## Test Cases (`test_student.py`)
-
-Test cases use pytest fixtures provided by the `pytest-prairielearn-grader` package.
-
-### Basic Example
-
-```python
-import numpy as np
-import numpy.linalg as la
 import pytest
+from pytest_prairielearn_grader import ConfigObject
+from pytest_prairielearn_grader.assertions import assert_fn_approx_equal
 from pytest_prairielearn_grader.fixture import StudentFixture
 
+autograder_config = ConfigObject(output_level="friendly", builtin_whitelist=["sum"])
 
-@pytest.mark.grading_data(name="x", points=1)
-def test_array_all_close(sandbox: StudentFixture) -> None:
-    """Test that student's solution x solves the linear system."""
-    correct_x = la.solve(sandbox.query("A"), sandbox.query("b"))
-    np.testing.assert_allclose(
-        sandbox.query("x"), correct_x, err_msg="x is not correct"
-    )
+
+@pytest.mark.grading_data(name="Average of one number", points=1)
+def test_single(sandbox: StudentFixture) -> None:
+    assert_fn_approx_equal(sandbox, "average", args=([5],), expected=5)
+
+
+@pytest.mark.parametrize("values", [[1, 2, 3], [2.5, -1, 0, 7], list(range(100))])
+@pytest.mark.grading_data(name="Average of several numbers", points=2)
+def test_several(sandbox: StudentFixture, values: list[float]) -> None:
+    assert_fn_approx_equal(sandbox, "average", args=(values,), expected=sum(values) / len(values))
+```
+
+- `grading_data` sets the name that students see and the test's points. A parametrized test gets
+  those points for each parameter.
+- `assert_fn_approx_equal` calls `average` in the sandbox and compares the result with a
+  tolerance. On a failure, the student sees which call was checked, the expected value and their
+  value. See [Checking Answers](#checking-answers) for the other helpers and for checks that hide the
+  expected value.
+- The `friendly` output level shows students only the assertion's message, without a traceback.
+- Student code gets a restricted set of builtins that doesn't include `sum`, so this question
+  allows it with `builtin_whitelist`. See [Builtin Function Control](#builtin-function-control).
+- Expected values are computed in the test. Don't put a reference solution in a file that student
+  code can read.
+
+### Testing Locally
+
+The grader image's entrypoint expects PrairieLearn's `/grade` layout. Build it from your question
+and a solution, run the image, and read the results:
+
+```bash
+mkdir -p grade/tests grade/student grade/data
+cp -R average/tests/. grade/tests/
+cp solution.py grade/student/student_code.py
+echo '{"params": {}}' > grade/data/data.json
+docker run --rm -v "$PWD/grade:/grade" prairielearn/grader-python-pytest:lite
+cat grade/results/results.json
+```
+
+The image moves files around, so make a fresh copy of the layout for each run. Put in
+`data.json` whatever `params` your `server.py` and elements would set. Try at least a correct
+solution, the unchanged starter code and a wrong answer for each test, and read each test's
+`message` in `results.json`.
+
+To run pytest directly while you write tests, install the packages from [Editor Setup](#editor-setup)
+and put the files that the grader reads in a folder named after the test file, next to it:
+
+```
+tests/
+├── test_student.py
+└── test_student/
+    ├── student_code_correct.py   (each student_code*.py file is graded separately)
+    ├── student_code_wrong.py
+    ├── setup_code.py             (if the question has one)
+    └── data.json                 (if the tests need params)
+```
+
+Then run `pytest tests/test_student.py`.
+
+## Where Code Belongs
+
+Besides `test_student.py`, the `tests` folder can hold these files:
+
+| File               | What the grader does with it                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `setup_code.py`    | Runs in the sandbox before the student's code. See [Giving Values to Student Code](#giving-values-to-student-code). |
+| `leading_code.py`  | Prepended to the student's code, in the same namespace.                                                             |
+| `trailing_code.py` | Appended to the student's code, in the same namespace.                                                              |
+| Helper modules     | Modules that student code can import, when listed in [`helper_modules`](#helper-modules).                           |
+| Data files         | Files that student code can read, when listed in [`data_files`](#data-files).                                       |
+
+Keep as much as possible in `test_student.py`, where each test runs on its own and controls its
+feedback. Most questions need only `initial_code.py` and `test_student.py`. Put each piece of code
+in the first place in this table that works:
+
+| Code                                                              | Where to put it                                                                                                                                                                 |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Expected values and reference solutions                           | The test                                                                                                                                                                        |
+| Calls to the student's functions                                  | `sandbox.query_function` or an assertion helper in the test                                                                                                                     |
+| Inputs to the student's functions, including random ones          | The test, passed as arguments. Use `@pytest.mark.parametrize` for several inputs.                                                                                               |
+| Variables that student code reads and that `server.py` randomizes | `data["params"]` in `server.py`, listed in `names_for_user`. Tests read them from the `data_json` fixture. This works for plain JSON values, not ones stored with `pl.to_json`. |
+| Fixed variables that student code reads                           | `starting_vars` in the `ConfigObject`, listed in `names_for_user`                                                                                                               |
+| Variables that student code reads and that need Python to build   | `setup_code.py`, such as numpy arrays or values decoded with `__from_server_json`                                                                                               |
+| Blocking a library function                                       | `setup_code.py`. To block a whole module, use `import_blacklist` instead.                                                                                                       |
+| Imports or definitions that the student's code relies on          | The starter code, so that the student sees them. Use `helper_modules` for a module the student imports. Use `leading_code.py` only when neither works.                          |
+
+Why:
+
+- **Trailing code runs when the sandbox starts.** If it calls a student function that raises, every
+  test fails with the same error, including tests of other functions. When a test calls the function
+  with `query_function`, only that test fails, and the message names the function.
+- **Setup code runs again for each test**, in the sandbox, with the same restrictions as student
+  code. Random values in it change between tests, and errors in it are reported as if the student's
+  code failed.
+- **Leading code is hidden.** The student's file only works with code they can't see, so it behaves
+  differently when they run it in a workspace or on their own computer.
+- **Values in `data["params"]`** are the same in every test and match what `question.html` shows,
+  and tests can read them without starting a sandbox.
+
+`test_student.py` can't import the other files in `tests/`. Put helper code for the tests in
+`test_student.py`, and read data files in tests with the [`tests_dir`](#available-fixtures)
+fixture.
+
+## Writing Tests
+
+Tests are pytest test functions in `tests/test_student.py`. They run in the order they appear in
+the file. The examples below leave out their imports, which usually are:
+
+```python
+import pytest
+from pytest_prairielearn_grader import ConfigObject
+from pytest_prairielearn_grader.assertions import assert_equal, assert_fn_equal, assert_true
+from pytest_prairielearn_grader.fixture import FeedbackFixture, StudentFixture
 ```
 
 ### Test Markers
 
-The `@pytest.mark.grading_data` decorator specifies test metadata:
+The `@pytest.mark.grading_data` decorator sets what PrairieLearn shows for the test:
 
 - `name`: Test name displayed to students
 - `points`: Maximum points for the test
 - `include_stdout_feedback`: (Optional, default=`True`) Whether to include student code's stdout in feedback
 
-Example with stdout control:
-
-```python
-@pytest.mark.grading_data(name="Test Output", points=2, include_stdout_feedback=True)
-def test_with_output(sandbox: StudentFixture) -> None:
-    result = sandbox.query_function("process_data", data)
-    assert result == expected_value
-    # Student's print statements will appear in feedback
-```
+`@pytest.mark.output(level=...)` sets how much of a failure students see. See
+[Output Levels](#output-levels).
 
 ### Available Fixtures
 
 These fixtures are provided by the `pytest-prairielearn-grader` package:
 
-1. **`sandbox: StudentFixture`**: Provides sandboxed access to student code. Use this to query variables
-   and call functions from the student's submission.
+1. **`sandbox: StudentFixture`**: Runs the setup code and student code in a new sandbox for each
+   test. Use it to query variables and call functions from the student's submission.
 
-2. **`module_sandbox: StudentFixture`**: Similar to `sandbox`, but maintains state across all tests in
-   a module. Useful when you want student code initialization to persist between tests (e.g., testing
-   stateful classes or persistent data structures).
+2. **`module_sandbox: StudentFixture`**: Like `sandbox`, but shares one sandbox across all tests in
+   the file. See [Module-Scoped Sandbox](#module-scoped-sandbox).
 
-3. **`feedback: FeedbackFixture`**: Manages partial credit and custom feedback messages for students.
+3. **`feedback: FeedbackFixture`**: Sets partial credit and adds feedback messages. See
+   [Partial Credit and Feedback](#partial-credit-and-feedback).
 
-4. **`data_json: DataFixture`**: Provides access to parameters from PrairieLearn's `data.json` file
-   (generated via `pl-external-grader-variables` and other elements).
+4. **`data_json: dict | None`**: The contents of PrairieLearn's `data.json`, such as
+   `data_json["params"]`.
 
-5. **`tests_dir: Path`**: The question's tests folder, which holds `leading_code.py` and any data files.
-   Use it to read instructor files in a test, for example `np.loadtxt(tests_dir / "pagerank_large.txt")`,
-   instead of building the path from `__file__`.
+5. **`tests_dir: Path`**: The question's tests folder. Use it to read instructor files in a test,
+   for example `np.loadtxt(tests_dir / "pagerank_large.txt")`, instead of building the path from
+   `__file__`.
+
+6. **`workspace_sandbox: WorkspaceFixture`**: For multi-file workspace projects. See
+   [Workspace Grading](#workspace-grading).
 
 For implementation details, see the [fixture source code](https://github.com/prairielearn/grader-python-v2/blob/main/src/pytest_prairielearn_grader/fixture.py).
 
-## Querying Student Code
+### Querying Student Code
 
 The `sandbox` fixture provides methods to interact with student code:
 
-### 1. Query Variables
+#### 1. Query Variables
 
 ```python
 value = sandbox.query("variable_name")
@@ -182,10 +285,10 @@ Raises a `NameError` if the variable doesn't exist, and a `RuntimeError` with a 
 @pytest.mark.grading_data(name="Check Variable", points=2)
 def test_variable(sandbox: StudentFixture) -> None:
     coefficient = sandbox.query("coefficient")
-    assert coefficient > 0, "Coefficient must be positive"
+    assert_true(coefficient > 0, msg="coefficient must be positive")
 ```
 
-### 2. Query Functions
+#### 2. Query Functions
 
 ```python
 result = sandbox.query_function("function_name", arg1, arg2, kwarg1=value1)
@@ -202,27 +305,18 @@ Calls a function defined in the student code with the given arguments and **retu
 ```python
 @pytest.mark.grading_data(name="Test Function", points=5)
 def test_function(sandbox: StudentFixture) -> None:
-    # Function returns value directly
     result = sandbox.query_function("calculate", 10, 20)
-    assert result == 30, f"Expected 30, got {result}"
+    assert_equal(result, 30, description="calculate(10, 20)")
 
-    # With keyword arguments
     result = sandbox.query_function("process", x=5, y=10)
-    assert result == expected_value
+    assert_equal(result, 15, description="process(x=5, y=10)")
 ```
 
-**Error handling:**
+You don't need to catch these errors: they fail the test with a message saying what went wrong.
 
-```python
-@pytest.mark.grading_data(name="Test with Error Handling", points=3)
-def test_with_error_handling(sandbox: StudentFixture) -> None:
-    try:
-        result = sandbox.query_function("risky_function", data)
-        assert result == expected_value
-    except RuntimeError as e:
-        # The error message includes the original exception details
-        pytest.fail(f"Function raised an error: {e}")
-```
+Each call has a 1 second timeout by default. See [Function Timeout](#4-function-timeout). When a
+test calls a student function many times, use `query_function_raw` and stop after the first
+`"timeout"` status, so that a slow function doesn't use up the grading job's time.
 
 **Testing for specific exceptions with `query_function_raw`:**
 
@@ -232,22 +326,18 @@ use `query_function_raw` to inspect the response directly:
 ```python
 @pytest.mark.grading_data(name="Test Exception Handling", points=3)
 def test_raises_value_error(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
-    """Test that student code properly validates input and raises ValueError."""
-    # Call function with invalid input - use query_function_raw to get the full response
     response = sandbox.query_function_raw("validate_input", -1)
 
-    # Check that an exception was raised
-    assert response["status"] == "exception", "Function should raise an exception for negative input"
+    assert_true(response["status"] == "exception", msg="validate_input(-1) should raise an exception")
     feedback.set_score(0.5)
 
-    # Verify it's the correct exception type
-    assert response["exception_name"] == "ValueError", \
-        f"Expected ValueError, got {response['exception_name']}"
+    assert_equal(response["exception_name"], "ValueError", description="the exception raised by validate_input(-1)")
     feedback.set_score(0.75)
 
-    # Optionally check the error message
-    assert "negative" in response["exception_message"].lower(), \
-        "Error message should mention negative values"
+    assert_true(
+        "negative" in response["exception_message"].lower(),
+        msg="The error message should mention negative values",
+    )
     feedback.set_score(1.0)
 ```
 
@@ -260,7 +350,7 @@ The `query_function_raw` response contains:
 - `exception_message`: The exception message string
 - `traceback`: Full traceback string for debugging
 
-### 3. Get Captured Output
+#### 3. Get Captured Output
 
 ```python
 output = sandbox.get_accumulated_stdout()
@@ -275,10 +365,10 @@ Retrieves stdout captured from student code execution across all function calls.
 def test_output(sandbox: StudentFixture) -> None:
     sandbox.query_function("print_greeting", "Alice")
     output = sandbox.get_accumulated_stdout()
-    assert "Hello, Alice!" in output, "Greeting not found in output"
+    assert_true("Hello, Alice!" in output, msg="Greeting not found in output")
 ```
 
-### 4. Function Timeout
+#### 4. Function Timeout
 
 Control execution time for individual function calls:
 
@@ -287,7 +377,7 @@ Control execution time for individual function calls:
 result = sandbox.query_function("slow_computation", data, query_timeout=2.0)
 ```
 
-### 5. Query Setup Variables
+#### 5. Query Setup Variables
 
 ```python
 x = sandbox.query_setup("x")
@@ -297,11 +387,124 @@ Retrieves a variable defined by `setup_code.py`, whether or not it's in `names_f
 comes from the same sandbox as the student's code, so a random value matches the one the student's
 code received.
 
-**Note**: Student code must define the queried symbols, and return values must be JSON-serializable.
-Supported types include: `int`, `float`, `str`, `list`, `dict`, `bool`, `None`, numpy arrays, pandas DataFrames,
+**Note**: Values sent back from the sandbox must be serializable. Supported types include: `int`, `float`, `str`, `list`, `dict`, `bool`, `None`, numpy arrays, pandas DataFrames,
 and plots built with `MatplotlibSerializer` (see [Testing Matplotlib Plots](#testing-matplotlib-plots)).
 
-## Partial Credit and Feedback
+### Checking Answers
+
+The `pytest_prairielearn_grader.assertions` module has helpers that raise an `AssertionError` with a
+structured message:
+
+```
+Checking: add(2, 3)
+Expected output: 5
+Your code output: -1
+The expected and actual output do not match.
+```
+
+**`assert_equal(actual, expected, *, msg=None, description=None)`**
+
+Compare two values for equality:
+
+```python
+assert_equal(sandbox.query("x"), 42, description="variable 'x'")
+```
+
+**`assert_approx_equal(actual, expected, *, rtol=1e-5, atol=1e-8, msg=None, description=None)`**
+
+Compare numbers with a tolerance. It's for scalars: see below for arrays.
+
+```python
+result = sandbox.query_function("compute_pi")
+assert_approx_equal(result, 3.14159, rtol=1e-3, description="compute_pi()")
+```
+
+**`assert_fn_equal(sandbox, func_name, *, args=(), kwargs=None, expected, msg=None, description=None, query_timeout=1.0)`**
+
+Call a student function and compare its return value. The description defaults to the call, such as
+`add(2, 3)`:
+
+```python
+assert_fn_equal(sandbox, "add", args=(2, 3), expected=5)
+```
+
+**`assert_fn_approx_equal(sandbox, func_name, *, args=(), kwargs=None, expected, rtol=1e-5, atol=1e-8, msg=None, query_timeout=1.0)`**
+
+Same as `assert_fn_equal`, with a tolerance:
+
+```python
+assert_fn_approx_equal(sandbox, "compute_area", args=(3.0,), expected=28.274, rtol=1e-2)
+```
+
+**`assert_true(condition, *, msg=None)` / `assert_false(condition, *, msg=None)`**
+
+Check a condition, and show only `msg` when it fails:
+
+```python
+assert_true(sandbox.query_function("is_valid", data), msg="is_valid() should accept valid input.")
+```
+
+#### Hiding Expected Values
+
+The comparison helpers show the expected value, which is fine when the student can see the test's
+inputs. For hidden test cases, use `assert_true` with a message that doesn't include the answer.
+
+Don't use a bare `assert` or numpy and pandas testing functions for checks that students see.
+pytest rewrites a bare `assert`, so its message includes both values, such as `assert 6 == 12345`.
+`np.testing.assert_allclose` and similar include both arrays. Use
+`assert_true(np.allclose(...), msg=...)` instead.
+
+For a numpy array, check the type, dtype, shape and values in that order, so that each failure has
+a clear message and a wrong shape doesn't reach `np.allclose`:
+
+```python
+value = sandbox.query("x")
+assert_true(isinstance(value, np.ndarray), msg="x should be a numpy array")
+assert_true(np.issubdtype(value.dtype, np.number), msg="x should contain numbers")
+assert_true(value.shape == expected.shape, msg=f"x should have shape {expected.shape}")
+assert_true(np.allclose(value, expected), msg="x is inaccurate")
+```
+
+For a pandas DataFrame, `pandas.testing.assert_frame_equal(expected, df)` works, but its message
+shows both frames.
+
+#### Output Levels
+
+The output level sets how much of a failure students see:
+
+| Level         | Shows to student                                              |
+| ------------- | ------------------------------------------------------------- |
+| `"none"`      | Exception class name only (e.g., `AssertionError`)            |
+| `"message"`   | Exception name + first line of message _(default when unset)_ |
+| `"traceback"` | Exception name + message + full traceback                     |
+| `"friendly"`  | Only the exception message text — no class name, no traceback |
+
+Use `"friendly"` with the assertion helpers. Set it on one test:
+
+```python
+@pytest.mark.output(level="friendly")
+@pytest.mark.grading_data(name="Test addition", points=5)
+def test_add(sandbox: StudentFixture) -> None:
+    assert_fn_equal(sandbox, "add", args=(2, 3), expected=5)
+```
+
+On every test in a file, with a module-level `pytestmark`:
+
+```python
+pytestmark = pytest.mark.output(level="friendly")
+```
+
+Or in the `ConfigObject`:
+
+```python
+autograder_config = ConfigObject(output_level="friendly")
+```
+
+With the `ConfigObject` approach, individual tests can still override it with
+`@pytest.mark.output(level="traceback")`. The `"message"` and `"traceback"` levels can help
+advanced students, who can learn from reading tracebacks.
+
+### Partial Credit and Feedback
 
 Tests flow linearly, allowing partial credit after certain assertions pass. When an assertion
 fails, the student receives the last partial credit value set before the failure.
@@ -311,17 +514,17 @@ fails, the student receives the last partial credit value set before the failure
 def test_with_partial_credit(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
     # Check basic requirements (worth 30%)
     result = sandbox.query("data_loaded")
-    assert result is not None, "Data must be loaded"
+    assert_true(result is not None, msg="Data must be loaded")
     feedback.set_score(0.3)
 
     # Check intermediate computation (worth 60%)
     intermediate = sandbox.query("processed_data")
-    assert len(intermediate) > 0, "Data processing failed"
+    assert_true(len(intermediate) > 0, msg="Data processing failed")
     feedback.set_score(0.6)
 
     # Check final result (worth 100%)
     final = sandbox.query("final_result")
-    assert final == expected_value, "Final result incorrect"
+    assert_true(final == expected_value, msg="Final result incorrect")
     feedback.set_score(1.0)
 
     # Add custom feedback
@@ -334,7 +537,224 @@ def test_with_partial_credit(sandbox: StudentFixture, feedback: FeedbackFixture)
 - `feedback.set_score_final(fraction)`: Set final score (prevents further updates)
 - `feedback.add_message(msg)`: Add custom feedback message
 
-## Advanced Features
+### Capturing and Testing Output
+
+Control whether student code output appears in feedback:
+
+```python
+@pytest.mark.grading_data(name="With Output", points=2, include_stdout_feedback=True)
+def test_with_output(sandbox: StudentFixture) -> None:
+    """Student's print statements will appear in feedback."""
+    result = sandbox.query_function("process_data")
+    # Any print() calls in student code are captured and shown
+    assert_equal(result, expected)
+
+
+@pytest.mark.grading_data(name="Without Output", points=2, include_stdout_feedback=False)
+def test_without_output(sandbox: StudentFixture) -> None:
+    """Student's print statements will NOT appear in feedback."""
+    result = sandbox.query_function("process_data")
+    assert_equal(result, expected)
+
+
+@pytest.mark.grading_data(name="Manual Output Check", points=2)
+def test_output_manually(sandbox: StudentFixture) -> None:
+    """Manually inspect and test stdout."""
+    sandbox.query_function("print_greeting", "Alice")
+    output = sandbox.get_accumulated_stdout()
+    assert_true("Hello, Alice!" in output, msg="Greeting message not found in output")
+```
+
+### Module-Scoped Sandbox
+
+Use `module_sandbox` instead of `sandbox` when you want student code state to persist
+across multiple tests:
+
+```python
+@pytest.mark.grading_data(name="Initialize", points=1)
+def test_initialization(module_sandbox: StudentFixture) -> None:
+    """First test initializes state."""
+    result = module_sandbox.query_function("initialize_counter")
+    assert_equal(result, 0)
+
+
+@pytest.mark.grading_data(name="Increment 1", points=1)
+def test_increment_1(module_sandbox: StudentFixture) -> None:
+    """State persists - counter should be 1."""
+    result = module_sandbox.query_function("increment_counter")
+    assert_equal(result, 1)
+
+
+@pytest.mark.grading_data(name="Increment 2", points=1)
+def test_increment_2(module_sandbox: StudentFixture) -> None:
+    """State still persists - counter should be 2."""
+    result = module_sandbox.query_function("increment_counter")
+    assert_equal(result, 2)
+```
+
+**Use Cases for `module_sandbox`**:
+
+- Testing stateful classes or modules
+- Expensive initialization that should only run once
+- Testing persistent data structures (databases, file systems, etc.)
+- Simulating multi-step workflows
+
+**Important**: With `module_sandbox`, student code is loaded once and shared across all tests
+in the module. Use regular `sandbox` for independent test execution.
+
+### Testing Matplotlib Plots
+
+To grade a plot, student code builds it with `MatplotlibSerializer` from the `plot-serializer` package and returns the serializer. The test receives a matplotlib `Figure`.
+
+`plot-serializer` is included in the `:latest` image but not in `:lite`. Returning a plain matplotlib `Figure` from student code isn't supported.
+
+```python
+# Student code
+from plot_serializer.matplotlib.serializer import MatplotlibSerializer
+
+
+def create_plot(data):
+    serializer = MatplotlibSerializer()
+    fig, ax = serializer.subplots()
+    ax.plot(data)
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Value")
+    ax.set_title("Data Visualization")
+    return serializer
+```
+
+```python
+# Test code
+import matplotlib
+matplotlib.use("Agg")  # Non-GUI backend for server environments
+
+import pytest
+from matplotlib.figure import Figure
+from matplotcheck.base import PlotTester
+from pytest_prairielearn_grader.assertions import assert_equal, assert_true
+from pytest_prairielearn_grader.fixture import StudentFixture
+
+
+@pytest.mark.grading_data(name="Plot Test", points=5)
+def test_student_plot(sandbox: StudentFixture) -> None:
+    """Test that student creates a correct plot."""
+    # Student function returns a MatplotlibSerializer, which arrives here as a Figure
+    plot = sandbox.query_function("create_plot", data)
+
+    assert_true(isinstance(plot, Figure))
+    assert_equal(len(plot.axes), 1)
+
+    # Use matplotcheck for detailed plot testing
+    ax = plot.axes[0]
+    pt = PlotTester(ax)
+
+    # Check plot properties
+    pt.assert_plot_type("line")
+    pt.assert_axis_label_contains(axis="x", strings_expected=["Time"])
+    pt.assert_axis_label_contains(axis="y", strings_expected=["Value"])
+    pt.assert_title_contains(["Data Visualization"])
+```
+
+The grader automatically serializes/deserializes:
+
+- Plots built with `MatplotlibSerializer` (received as a `Figure`)
+- NumPy arrays
+- Pandas DataFrames
+- Standard Python types (int, float, str, list, dict, bool, None)
+
+## Giving Values to Student Code
+
+Some questions give students variables to use, such as a matrix to factor. Student code only gets
+the variables named in `names_for_user`. Each name's value comes from the first of these that
+defines it:
+
+1. A variable that `setup_code.py` defines.
+2. `starting_vars` in the [`ConfigObject`](#configuration-with-configobject).
+3. `data["params"]` from `data.json`.
+
+`names_for_user` comes from the `ConfigObject` if it's set there, as a list of strings. Otherwise
+it comes from `data["params"]["names_for_user"]`, a list of `{"name": ..., "description": ...,
+"type": ...}` objects, which `<pl-external-grader-variables params-name="names_for_user">` in
+`question.html` usually sets. Without `names_for_user`, student code gets no variables, and using
+one fails with a `NameError`. `names_from_user` only displays a table in the question, and the
+grader ignores it.
+
+### Parameters from `server.py`
+
+When `server.py` randomizes plain values, list them in `names_for_user` and read them in tests with
+the `data_json` fixture:
+
+```python
+# server.py
+import random
+
+
+def generate(data):
+    data["params"]["n"] = random.randint(5, 10)
+```
+
+```html
+<!-- question.html -->
+<pl-external-grader-variables params-name="names_for_user">
+  <pl-variable name="n" type="integer">The number of terms</pl-variable>
+</pl-external-grader-variables>
+```
+
+```python
+# tests/test_student.py
+@pytest.mark.grading_data(name="total", points=1)
+def test_total(sandbox: StudentFixture, data_json: dict) -> None:
+    n = data_json["params"]["n"]
+    assert_equal(sandbox.query("total"), n * (n + 1) // 2, description="total")
+```
+
+### Fixed Values
+
+For a value that's the same in every variant, use `starting_vars`:
+
+```python
+autograder_config = ConfigObject(starting_vars={"threshold": 5.0}, names_for_user=["threshold"])
+```
+
+### Setup Code (`setup_code.py`)
+
+Use setup code when a value needs Python to build, such as a numpy array, or to block library
+functions. It runs in the sandbox before the student's code:
+
+```python
+import numpy as np
+import numpy.linalg as la
+
+
+def not_allowed(*args, **kwargs):
+    raise RuntimeError("Usage of this function is not allowed in this question.")
+
+
+n = np.random.randint(4, 16)
+
+# A random full-rank matrix
+X = la.qr(np.random.random_sample((n, n)))[0]
+D = np.diag(np.random.random_sample(n) * 10 + 1)
+A = X.T @ D @ X
+b = np.random.random(n)
+
+la.inv = not_allowed
+la.pinv = not_allowed
+```
+
+With `names_for_user` set to `A`, `b` and `n`, student code gets those three variables, and its
+`la.inv` raises an error.
+
+- **Parameters.** `__data_params` holds `data["params"]`. Values that `server.py` stored with
+  `pl.to_json` are still encoded: decode them with `__from_server_json`, for example
+  `A = __from_server_json(__data_params["A"])`. The `prairielearn` package isn't available.
+- **Restrictions.** Setup code has the same builtins and import rules as student code. For example,
+  it can't call `open` or import `os`. To read a data file, list it in [`data_files`](#data-files).
+- **Fresh values.** With the `sandbox` fixture, setup code runs again for each test, so random
+  values differ between tests. Read a setup value in the test that uses it, with
+  [`sandbox.query_setup`](#5-query-setup-variables).
+
+## Configuration
 
 ### Configuration with ConfigObject
 
@@ -355,6 +775,7 @@ Import and create a `ConfigObject` at the module level in your `test_student.py`
 
 ```python
 from pytest_prairielearn_grader import ConfigObject
+from pytest_prairielearn_grader.assertions import assert_equal, assert_true
 from pytest_prairielearn_grader.fixture import StudentFixture
 import pytest
 
@@ -371,27 +792,35 @@ autograder_config = ConfigObject(
 def test_with_config(sandbox: StudentFixture) -> None:
     # Configuration is automatically applied
     result = sandbox.query_function("process", data)
-    assert result == expected_value
+    assert_equal(result, expected_value)
 ```
 
 #### ConfigObject Parameters
 
-All parameters are optional with sensible defaults:
+All parameters are optional:
 
-- **`sandbox_timeout`** (float, default=1.0): Timeout in seconds for sandbox initialization and operations
-- **`import_whitelist`** (list[str] | None): Allowed import modules (whitelist mode)
-- **`import_blacklist`** (list[str] | None): Blocked import modules (blacklist mode)
-- **`builtin_whitelist`** (list[str] | None): Allowed builtin functions
-- **`helper_modules`** (list[str] | None): Modules from the tests folder that can be imported (see [Helper Modules](#helper-modules))
-- **`data_files`** (list[str] | None): Files from the tests folder that code in the sandbox can read by relative path (see [Data Files](#data-files))
-- **`names_for_user`** (list[str] | None): List of variable names to inject into student code
-- **`student_code_pattern`** (str, default="student_code\*.py"): Glob pattern for finding student files
-- **`starting_vars`** (dict[str, Any], default={}): Dictionary of variable values to provide for injection
+| Parameter                  | Default                                            | Description                                                                                                                                |
+| -------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sandbox_timeout`          | `1.0`                                              | Seconds allowed for starting the sandbox, which runs the setup code and student code. See [Timeout Configuration](#timeout-configuration). |
+| `output_level`             | `None`                                             | Default [output level](#output-levels) for every test.                                                                                     |
+| `names_for_user`           | `None`                                             | Variables to give student code. See [Giving Values to Student Code](#giving-values-to-student-code).                                       |
+| `starting_vars`            | `{}`                                               | Values for names in `names_for_user`.                                                                                                      |
+| `student_code_pattern`     | `"student_code*.py"`                               | Glob pattern for the student's file.                                                                                                       |
+| `import_whitelist`         | `None`                                             | Modules that code in the sandbox may import. `None` allows all. See [Import Control](#import-control).                                     |
+| `import_blacklist`         | `["os", "sys", "subprocess", "pathlib", "shutil"]` | Modules that code in the sandbox may not import.                                                                                           |
+| `builtin_whitelist`        | `None`                                             | Builtins to allow beyond the safe defaults. See [Builtin Function Control](#builtin-function-control).                                     |
+| `helper_modules`           | `None`                                             | Modules from the tests folder that can be imported. See [Helper Modules](#helper-modules).                                                 |
+| `data_files`               | `None`                                             | Files from the tests folder that code in the sandbox can read by relative path. See [Data Files](#data-files).                             |
+| `syntax_errors_ungradable` | `True`                                             | Whether a syntax error makes the submission ungradable. See [Ungradable Submission Detection](#ungradable-submission-detection).           |
+| `notebook_cell_tag`        | `None`                                             | Grade only notebook cells that start with this tag. See [Jupyter Notebook Grading](#jupyter-notebook-grading).                             |
+| `workspace_mode`           | `False`                                            | Grade a multi-file project. See [Workspace Grading](#workspace-grading).                                                                   |
+| `workspace_student_dir`    | `None`                                             | The student's project folder in workspace mode.                                                                                            |
+| `workspace_exec_entry`     | `None`                                             | A file to run at startup in workspace mode.                                                                                                |
 
 #### Helper Modules
 
 The tests folder isn't on the import path in the sandbox, and `import_whitelist` only permits a
-name. To let setup code, `leading_code.py` and student code import a file from that folder, name it
+name. To let setup code and student code import a file from that folder, name it
 in `helper_modules`:
 
 ```python
@@ -400,7 +829,7 @@ autograder_config = ConfigObject(helper_modules=["helper_function"])
 ```
 
 ```python
-# tests/leading_code.py, or the student's code
+# the student's code, or setup code
 import helper_function as hf
 ```
 
@@ -448,7 +877,7 @@ def test_pagerank(sandbox: StudentFixture, tests_dir: Path) -> None:
 ```
 
 ```python
-# tests/leading_code.py, or the student's code
+# the student's code, or setup code
 edges = np.loadtxt("pagerank_large.txt")
 ```
 
@@ -468,16 +897,6 @@ edges = np.loadtxt("pagerank_large.txt")
   not the student's workspace folder.
 
 > **Warning:** Students can read the listed files, so they must not contain answers.
-
-**How variable injection works**:
-
-- Only variables listed in `names_for_user` are injected into the student code namespace
-- Values are resolved in this priority order:
-  1. **Highest**: Variables defined in `setup_code.py` execution
-  2. **Medium**: Values from `ConfigObject.starting_vars`
-  3. **Lowest**: Values from `data.json` params
-- If `names_for_user` is not specified, no variables are injected (prevents variable leaking)
-- `starting_vars` provides values but does NOT automatically inject them - variables must still be listed in `names_for_user`
 
 #### Configuration Priority
 
@@ -504,6 +923,7 @@ sandbox_timeout = 1.0
 
 ```python
 from pytest_prairielearn_grader import ConfigObject
+from pytest_prairielearn_grader.assertions import assert_equal, assert_true
 from pytest_prairielearn_grader.fixture import StudentFixture, FeedbackFixture
 import pytest
 
@@ -534,10 +954,10 @@ def test_data_processing(sandbox: StudentFixture, feedback: FeedbackFixture) -> 
     # All configuration from ConfigObject is automatically applied
     result = sandbox.query_function("process_data")
 
-    assert len(result) > 0, "Result should not be empty"
+    assert_true(len(result) > 0, msg="Result should not be empty")
     feedback.set_score(0.5)
 
-    assert result == expected_output, "Incorrect processing result"
+    assert_true(result == expected_output, msg="Incorrect processing result")
     feedback.set_score(1.0)
 ```
 
@@ -566,6 +986,84 @@ config = ConfigObject(2.0)  # TypeError
 
 # ✗ Error: names_for_user must contain strings
 config = ConfigObject(names_for_user=[123, 456])  # ValueError
+```
+
+### Timeout Configuration
+
+Control execution time limits for sandbox initialization and function calls to prevent infinite loops or slow student code.
+
+**Important**: Timeouts apply to:
+
+- **Sandbox initialization** (loading and executing student code at startup)
+- **Function calls** via `sandbox.query_function()` with `query_timeout` parameter
+
+Variable queries via `sandbox.query()` do not have timeouts since they're simple lookups.
+
+#### Module-level Default Timeout
+
+Set a default timeout for sandbox initialization in all tests in a file. This variable and the
+`sandbox_timeout` marker below are ignored when the file has an `autograder_config`, so use
+`ConfigObject(sandbox_timeout=...)` there instead.
+
+```python
+import pytest
+from pytest_prairielearn_grader.assertions import assert_equal, assert_true
+from pytest_prairielearn_grader.fixture import StudentFixture
+
+sandbox_timeout = 2.0  # 2 second timeout for initialization
+
+
+@pytest.mark.grading_data(name="Test 1", points=1)
+def test_with_default_timeout(sandbox: StudentFixture) -> None:
+    # The sandbox was initialized with 2 second timeout
+    # Now we can safely query variables and call functions
+    result = sandbox.query_function("compute_result")
+    assert_equal(result, 5)
+```
+
+#### Per-test Timeout Override
+
+Override the default initialization timeout with the `@pytest.mark.sandbox_timeout` marker:
+
+```python
+@pytest.mark.grading_data(name="Fast Test", points=1)
+@pytest.mark.sandbox_timeout(0.5)  # 0.5 second initialization timeout
+def test_with_custom_timeout(sandbox: StudentFixture) -> None:
+    # This sandbox was initialized with 0.5 second timeout
+    result = sandbox.query_function("quick_computation")
+    assert_equal(result, 5)
+```
+
+#### Per-function Timeout
+
+Set timeout for individual function calls using the `query_timeout` parameter:
+
+```python
+@pytest.mark.grading_data(name="Function Test", points=2)
+def test_function_timeout(sandbox: StudentFixture) -> None:
+    # This specific function call has a 1 second timeout
+    result = sandbox.query_function("compute", data, query_timeout=1.0)
+    assert_equal(result, expected_value)
+
+    # This function call uses the default timeout (no per-function limit)
+    result2 = sandbox.query_function("another_compute", data)
+    assert_equal(result2, expected_value2)
+```
+
+**Using ConfigObject for timeouts:**
+
+```python
+from pytest_prairielearn_grader import ConfigObject
+
+autograder_config = ConfigObject(
+    sandbox_timeout=3.0,  # Sets initialization timeout
+)
+
+@pytest.mark.grading_data(name="Test", points=1)
+def test_with_config_timeout(sandbox: StudentFixture) -> None:
+    # Initialized with 3 second timeout from ConfigObject
+    result = sandbox.query_function("process", query_timeout=1.0)
+    assert_equal(result, expected)
 ```
 
 ### Security: Import and Builtin Restrictions
@@ -640,15 +1138,20 @@ The blacklist only checks import statements, so it isn't a security boundary. Fo
 
 #### Builtin Function Control
 
-Python's builtin functions (like `open()`, `eval()`, `exec()`) are automatically restricted to a safe subset. The autograder provides **only safe builtins by default**, including:
+Setup code, student code and helper modules get only these builtins by default:
 
-- Standard types: `int`, `float`, `str`, `bool`, `list`, `dict`, `tuple`, `set`, `frozenset`
-- Type checking: `isinstance`, `issubclass`, `type`
-- Iteration: `iter`, `next`, `enumerate`, `zip`, `range`, `reversed`, `sorted`, `filter`, `map`
-- Math: `abs`, `min`, `max`, `sum`, `round`, `pow`, `divmod`
-- Conversion: `chr`, `ord`, `bin`, `oct`, `hex`, `hash`
-- Common functions: `len`, `print`, `repr`, `getattr`, `hasattr`, `format`
-- Python exceptions (for proper error handling)
+- Types: `bool`, `bytes`, `complex`, `dict`, `float`, `int`, `list`, `set`, `slice`, `str`, `tuple`
+- Type checking: `callable`, `isinstance`, `issubclass`
+- Iteration: `enumerate`, `map`, `range`, `sorted`, `zip`
+- Math: `abs`, `divmod`, `max`, `min`, `pow`, `round`
+- Conversion: `chr`, `hash`, `hex`, `id`, `oct`, `ord`, `repr`
+- Other: `len`, `print`, `None`, `True`, `False`, and class definitions
+- The standard exception classes, such as `ValueError`
+
+Many common builtins aren't in this list, including `sum`, `any`, `all`, `type`, `getattr`,
+`hasattr`, `iter`, `next`, `reversed`, `filter`, `frozenset`, `format`, `object` and `super`. Student
+code that uses one fails with a `NameError`, so add the ones your question's solutions need to
+`builtin_whitelist`.
 
 **Dangerous builtins automatically blocked** include: `open`, `eval`, `exec`, `compile`, `__import__`, `input`, `exit`, `quit`, and others that could compromise security.
 
@@ -657,23 +1160,25 @@ Python's builtin functions (like `open()`, `eval()`, `exec()`) are automatically
 ```python
 # In server.py
 def generate(data):
-    data["params"]["builtin_whitelist"] = ["dict", "sorted", "enumerate"]
-    # Students can now use dict(), sorted(), and enumerate() in addition to safe defaults
-    # This is useful when you want to allow specific advanced builtins
+    data["params"]["builtin_whitelist"] = ["sum", "any", "all"]
+    # Students can now use sum(), any() and all() in addition to the defaults
 ```
 
 **Example with builtin whitelist:**
 
 ```python
-# data.json has "builtin_whitelist": ["dict"]
+# data.json has "builtin_whitelist": ["sum"]
 
-# Safe builtins work normally:
-my_list = [1, 2, 3]  # ✓ list is safe by default
-length = len(my_list)  # ✓ len is safe by default
-print(length)  # ✓ print is safe by default
+# Default builtins work normally:
+my_list = [1, 2, 3]  # ✓ list is a default
+length = len(my_list)  # ✓ len is a default
+print(length)  # ✓ print is a default
 
 # Whitelisted builtins work:
-my_dict = dict(a=1, b=2)  # ✓ dict is in whitelist
+total = sum(my_list)  # ✓ sum is in the whitelist
+
+# Other builtins are blocked:
+found = any(my_list)  # ✗ NameError: name 'any' is not defined
 
 # Dangerous builtins are blocked:
 f = open("file.txt")  # ✗ NameError: 'open' is not defined
@@ -690,12 +1195,12 @@ def generate(data):
     # Allow only numpy and math imports
     data["params"]["import_whitelist"] = ["numpy", "math"]
 
-    # Allow dict builtin for student convenience
-    data["params"]["builtin_whitelist"] = ["dict"]
+    # Allow sum for student convenience
+    data["params"]["builtin_whitelist"] = ["sum"]
 
     # Now students can:
     # - Import numpy and math
-    # - Use dict() plus safe builtins
+    # - Use sum() plus the default builtins
     # - Cannot import other modules
     # - Cannot use dangerous builtins like open(), eval()
 ```
@@ -714,7 +1219,7 @@ def generate(data):
 
     # Configure security restrictions
     data["params"]["import_whitelist"] = ["numpy", "numpy.linalg"]
-    data["params"]["builtin_whitelist"] = ["dict", "sorted"]
+    data["params"]["builtin_whitelist"] = ["sum"]
 
     # Define variables accessible to student code
     data["params"]["names_for_user"] = [
@@ -734,6 +1239,7 @@ To test your restrictions in the test scenarios:
 ```python
 # tests/test_student.py
 import pytest
+from pytest_prairielearn_grader.assertions import assert_equal, assert_true
 from pytest_prairielearn_grader.fixture import StudentFixture
 
 @pytest.mark.grading_data(name="Test with restrictions", points=5)
@@ -742,7 +1248,7 @@ def test_security(sandbox: StudentFixture) -> None:
     # If student code tries to import blocked modules,
     # the sandbox will raise an ImportError during initialization
     result = sandbox.query_function("safe_function", data)
-    assert result == expected
+    assert_equal(result, expected)
 ```
 
 ```python
@@ -750,7 +1256,7 @@ def test_security(sandbox: StudentFixture) -> None:
 {
   "params": {
     "import_whitelist": ["numpy", "math"],
-    "builtin_whitelist": ["dict"],
+    "builtin_whitelist": ["sum"],
     "names_for_user": [...]
   }
 }
@@ -761,10 +1267,10 @@ def test_security(sandbox: StudentFixture) -> None:
 **1. Force students to implement algorithms from scratch:**
 
 ```python
-# Require students to implement their own sorting
+# Require students to write their own sum
 data["params"]["import_whitelist"] = []  # No imports allowed
-data["params"]["builtin_whitelist"] = []  # No additional builtins beyond safe defaults
-# Students must implement sorting without sorted() or external libraries
+# Don't set builtin_whitelist: sum isn't a default builtin, so students can't call it.
+# sorted is a default, so this doesn't stop students from sorting with it.
 ```
 
 **2. Allow numerical computing but block system access:**
@@ -783,431 +1289,13 @@ data["params"]["import_blacklist"] = ["os", "sys", "subprocess", "pathlib", "shu
 # All other imports allowed, but dangerous ones explicitly blocked
 ```
 
-### Timeout Configuration
-
-Control execution time limits for sandbox initialization and function calls to prevent infinite loops or slow student code.
-
-**Important**: Timeouts apply to:
-
-- **Sandbox initialization** (loading and executing student code at startup)
-- **Function calls** via `sandbox.query_function()` with `query_timeout` parameter
-
-Variable queries via `sandbox.query()` do not have timeouts since they're simple lookups.
-
-#### Module-level Default Timeout
-
-Set a default timeout for sandbox initialization in all tests in a file. This variable and the
-`sandbox_timeout` marker below are ignored when the file has an `autograder_config`, so use
-`ConfigObject(sandbox_timeout=...)` there instead.
-
-```python
-import pytest
-from pytest_prairielearn_grader.fixture import StudentFixture
-
-sandbox_timeout = 2.0  # 2 second timeout for initialization
-
-
-@pytest.mark.grading_data(name="Test 1", points=1)
-def test_with_default_timeout(sandbox: StudentFixture) -> None:
-    # The sandbox was initialized with 2 second timeout
-    # Now we can safely query variables and call functions
-    result = sandbox.query_function("compute_result")
-    assert result == 5
-```
-
-#### Per-test Timeout Override
-
-Override the default initialization timeout with the `@pytest.mark.sandbox_timeout` marker:
-
-```python
-@pytest.mark.grading_data(name="Fast Test", points=1)
-@pytest.mark.sandbox_timeout(0.5)  # 0.5 second initialization timeout
-def test_with_custom_timeout(sandbox: StudentFixture) -> None:
-    # This sandbox was initialized with 0.5 second timeout
-    result = sandbox.query_function("quick_computation")
-    assert result == 5
-```
-
-#### Per-function Timeout
-
-Set timeout for individual function calls using the `query_timeout` parameter:
-
-```python
-@pytest.mark.grading_data(name="Function Test", points=2)
-def test_function_timeout(sandbox: StudentFixture) -> None:
-    # This specific function call has a 1 second timeout
-    result = sandbox.query_function("compute", data, query_timeout=1.0)
-    assert result == expected_value
-
-    # This function call uses the default timeout (no per-function limit)
-    result2 = sandbox.query_function("another_compute", data)
-    assert result2 == expected_value2
-```
-
-**Using ConfigObject for timeouts:**
-
-```python
-from pytest_prairielearn_grader import ConfigObject
-
-autograder_config = ConfigObject(
-    sandbox_timeout=3.0,  # Sets initialization timeout
-)
-
-@pytest.mark.grading_data(name="Test", points=1)
-def test_with_config_timeout(sandbox: StudentFixture) -> None:
-    # Initialized with 3 second timeout from ConfigObject
-    result = sandbox.query_function("process", query_timeout=1.0)
-    assert result == expected
-```
-
-### Module-Scoped Sandbox
-
-Use `module_sandbox` instead of `sandbox` when you want student code state to persist
-across multiple tests:
-
-```python
-@pytest.mark.grading_data(name="Initialize", points=1)
-def test_initialization(module_sandbox: StudentFixture) -> None:
-    """First test initializes state."""
-    result = module_sandbox.query_function("initialize_counter")
-    assert result == 0
-
-
-@pytest.mark.grading_data(name="Increment 1", points=1)
-def test_increment_1(module_sandbox: StudentFixture) -> None:
-    """State persists - counter should be 1."""
-    result = module_sandbox.query_function("increment_counter")
-    assert result == 1
-
-
-@pytest.mark.grading_data(name="Increment 2", points=1)
-def test_increment_2(module_sandbox: StudentFixture) -> None:
-    """State still persists - counter should be 2."""
-    result = module_sandbox.query_function("increment_counter")
-    assert result == 2
-```
-
-**Use Cases for `module_sandbox`**:
-
-- Testing stateful classes or modules
-- Expensive initialization that should only run once
-- Testing persistent data structures (databases, file systems, etc.)
-- Simulating multi-step workflows
-
-**Important**: With `module_sandbox`, student code is loaded once and shared across all tests
-in the module. Use regular `sandbox` for independent test execution.
-
-### Capturing and Testing Output
-
-Control whether student code output appears in feedback:
-
-```python
-@pytest.mark.grading_data(name="With Output", points=2, include_stdout_feedback=True)
-def test_with_output(sandbox: StudentFixture) -> None:
-    """Student's print statements will appear in feedback."""
-    result = sandbox.query_function("process_data")
-    # Any print() calls in student code are captured and shown
-    assert result == expected
-
-
-@pytest.mark.grading_data(name="Without Output", points=2, include_stdout_feedback=False)
-def test_without_output(sandbox: StudentFixture) -> None:
-    """Student's print statements will NOT appear in feedback."""
-    result = sandbox.query_function("process_data")
-    assert result == expected
-
-
-@pytest.mark.grading_data(name="Manual Output Check", points=2)
-def test_output_manually(sandbox: StudentFixture) -> None:
-    """Manually inspect and test stdout."""
-    sandbox.query_function("print_greeting", "Alice")
-    output = sandbox.get_accumulated_stdout()
-    assert "Hello, Alice!" in output, "Greeting message not found in output"
-```
-
-### Student-Friendly Feedback Mode
-
-By default, when a test fails, students see the Python exception class name, a "failed with an
-exception:" prefix, and (depending on the output level) a full traceback. This is useful for
-debugging but can be intimidating for introductory-level students.
-
-The **friendly** output level suppresses all traceback noise and shows only the human-readable
-assertion message. Combine it with the built-in assertion helpers to produce clean, structured
-feedback like:
-
-```
-Checking: add(2, 3)
-Expected output: 5
-Your code output: -1
-The expected and actual output do not match.
-```
-
-#### Enabling Friendly Output
-
-Apply `@pytest.mark.output(level="friendly")` to individual tests:
-
-```python
-import pytest
-from pytest_prairielearn_grader.fixture import StudentFixture
-from pytest_prairielearn_grader.assertions import assert_fn_equal, assert_equal
-
-@pytest.mark.output(level="friendly")
-@pytest.mark.grading_data(name="Test addition", points=5)
-def test_add(sandbox: StudentFixture) -> None:
-    assert_fn_equal(sandbox, "add", args=(2, 3), expected=5)
-```
-
-Or apply it to every test in a file with a module-level `pytestmark`:
-
-```python
-import pytest
-
-pytestmark = pytest.mark.output(level="friendly")
-```
-
-Or set it globally via `ConfigObject` (recommended for intro courses):
-
-```python
-from pytest_prairielearn_grader import ConfigObject
-
-autograder_config = ConfigObject(
-    output_level="friendly",  # All tests use friendly output by default
-)
-```
-
-With the `ConfigObject` approach, individual tests can still override with
-`@pytest.mark.output(level="traceback")` if needed.
-
-**All output levels:**
-
-| Level | Shows to student |
-|-------|-----------------|
-| `"none"` | Exception class name only (e.g., `AssertionError`) |
-| `"message"` | Exception name + first line of message *(default when unset)* |
-| `"traceback"` | Exception name + message + full traceback |
-| `"friendly"` | Only the exception message text — no class name, no traceback |
-
-#### Assertion Helpers
-
-The `pytest_prairielearn_grader.assertions` module provides helpers that produce the
-structured "Checking / Expected / Your output" messages. They raise `AssertionError`
-with the formatted message, which the friendly output level then shows as-is.
-
-**`assert_equal(actual, expected, *, msg=None, description=None)`**
-
-Compare two values for equality:
-
-```python
-value = sandbox.query("x")
-assert_equal(value, 42, description="variable 'x'")
-# On failure:
-#   Checking: variable 'x'
-#   Expected output: 42
-#   Your code output: 99
-#   The expected and actual output do not match.
-```
-
-**`assert_approx_equal(actual, expected, *, rtol=1e-5, atol=1e-8, msg=None, description=None)`**
-
-Compare numeric values with tolerance:
-
-```python
-result = sandbox.query_function("compute_pi")
-assert_approx_equal(result, 3.14159, rtol=1e-3, description="compute_pi()")
-```
-
-**`assert_true(condition, *, msg=None)` / `assert_false(condition, *, msg=None)`**
-
-Check boolean conditions with a clean message:
-
-```python
-result = sandbox.query_function("is_valid", data)
-assert_true(result, msg="Expected is_valid() to return True for valid input.")
-```
-
-**`assert_fn_equal(sandbox, func_name, *, args=(), kwargs=None, expected, msg=None, description=None, query_timeout=1.0)`**
-
-Call a student function and compare its return value — the most common helper. It
-automatically generates the description from the function call:
-
-```python
-assert_fn_equal(sandbox, "add", args=(2, 3), expected=5)
-# On failure:
-#   Checking: add(2, 3)
-#   Expected output: 5
-#   Your code output: -1
-#   The expected and actual output do not match.
-```
-
-**`assert_fn_approx_equal(sandbox, func_name, *, args=(), kwargs=None, expected, rtol=1e-5, atol=1e-8, msg=None, query_timeout=1.0)`**
-
-Same as `assert_fn_equal` but uses approximate comparison:
-
-```python
-assert_fn_approx_equal(sandbox, "compute_area", args=(3.0,), expected=28.274, rtol=1e-2)
-```
-
-#### Combining with Partial Credit
-
-Friendly mode works seamlessly with `FeedbackFixture`:
-
-```python
-@pytest.mark.output(level="friendly")
-@pytest.mark.grading_data(name="Multi-step", points=10)
-def test_multi_step(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
-    # Step 1: basic check
-    assert_fn_equal(sandbox, "initialize", expected=0)
-    feedback.set_score(0.5)
-
-    # Step 2: harder check — if this fails, student keeps 50%
-    assert_fn_equal(sandbox, "compute", args=(10,), expected=100)
-    feedback.set_score(1.0)
-```
-
-#### When to Use Friendly Mode
-
-- **Introductory courses**: Students who haven't seen Python tracebacks benefit from simpler messages.
-- **Lite image questions**: Pairs well with the `:lite` Docker image for intro CS courses.
-- **Standardized feedback**: When you want all failure messages to follow a consistent format.
-
-For advanced courses, the default output levels (`message` or `traceback`) may be more appropriate
-since students can learn from reading full tracebacks.
-
-### Testing Matplotlib Plots
-
-To grade a plot, student code builds it with `MatplotlibSerializer` from the `plot-serializer` package and returns the serializer. The test receives a matplotlib `Figure`.
-
-`plot-serializer` is included in the `:latest` image but not in `:lite`. Returning a plain matplotlib `Figure` from student code isn't supported.
-
-```python
-# Student code
-from plot_serializer.matplotlib.serializer import MatplotlibSerializer
-
-
-def create_plot(data):
-    serializer = MatplotlibSerializer()
-    fig, ax = serializer.subplots()
-    ax.plot(data)
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Value")
-    ax.set_title("Data Visualization")
-    return serializer
-```
-
-```python
-# Test code
-import matplotlib
-matplotlib.use("Agg")  # Non-GUI backend for server environments
-
-import pytest
-from matplotlib.figure import Figure
-from matplotcheck.base import PlotTester
-from pytest_prairielearn_grader.fixture import StudentFixture
-
-
-@pytest.mark.grading_data(name="Plot Test", points=5)
-def test_student_plot(sandbox: StudentFixture) -> None:
-    """Test that student creates a correct plot."""
-    # Student function returns a MatplotlibSerializer, which arrives here as a Figure
-    plot = sandbox.query_function("create_plot", data)
-
-    assert isinstance(plot, Figure)
-    assert len(plot.axes) == 1
-
-    # Use matplotcheck for detailed plot testing
-    ax = plot.axes[0]
-    pt = PlotTester(ax)
-
-    # Check plot properties
-    pt.assert_plot_type("line")
-    pt.assert_axis_label_contains(axis="x", strings_expected=["Time"])
-    pt.assert_axis_label_contains(axis="y", strings_expected=["Value"])
-    pt.assert_title_contains(["Data Visualization"])
-```
-
-The grader automatically serializes/deserializes:
-
-- Plots built with `MatplotlibSerializer` (received as a `Figure`)
-- NumPy arrays
-- Pandas DataFrames
-- Standard Python types (int, float, str, list, dict, bool, None)
-
-## More Examples
-
-To see more examples of what is possible in these test files, look at the test cases in
-[this folder](https://github.com/prairielearn/grader-python-v2/tree/main/tests/scenario_root). Each test file is called `scenario.py`.
-
-## PrairieLearn Configuration
-
-In your PrairieLearn question's `info.json`, specify the grader image:
-
-```json
-{
-  "title": "Your Question Title",
-  "topic": "Your Topic",
-  "tags": ["your-tags"],
-  "type": "v3",
-  "gradingMethod": "External",
-  "externalGradingOptions": {
-    "enabled": true,
-    "image": "prairielearn/grader-python-pytest:latest",
-    "timeout": 30
-  }
-}
-```
-
-### Choosing an Image
-
-Two image variants are published. Pick the smallest one that includes what your question needs — a smaller image means faster cold-start pull times and a reduced security surface.
-
-| Tag       | Size (approx.) | Includes                                                                                                                                                                                 | Best for                                                                                        |
-| --------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `:latest` | ~400–500 MB    | Full scientific stack: `numpy`, `pandas`, `scipy`, `matplotlib` + `matplotcheck2` + `plot-serializer`, `seaborn`, `scikit-learn`, `sympy`, `networkx`, `nltk`, `nbformat`, and more | Any course that needs scientific computing, data science, plotting, or Jupyter notebook grading |
-| `:lite`   | ~60–80 MB      | Grader core only: `pytest-prairielearn-grader`, `Pygments`, `beautifulsoup4`, `defusedxml`, `requests`                                                                                   | Introductory CS courses where student code uses only the Python standard library                |
-
-To use the lite image, change the `image` field:
-
-```json
-"externalGradingOptions": {
-  "enabled": true,
-  "image": "prairielearn/grader-python-pytest:lite",
-  "timeout": 30
-}
-```
-
-> **Note:** If a student's code imports a package that isn't present in the image (e.g., `numpy` in `:lite`), it will raise an `ImportError` and the test will fail with an exception. Make sure the image you choose contains everything both your test code and the expected student solution require.
-
-Pinned version tags (e.g., `:v1.2.3` and `:v1.2.3-lite`) are also published alongside each release if you need a reproducible build.
-
-## Tips and Best Practices
-
-1. **Use descriptive test names**: The `name` in `@pytest.mark.grading_data` is shown to students
-2. **Provide clear error messages**: Use informative assertion messages to guide students
-3. **Test incrementally**: Break complex problems into smaller tests with partial credit
-4. **Control output visibility**: Use `include_stdout_feedback=False` for tests where student output
-   would be confusing or reveal answers
-5. **Set appropriate timeouts**: Prevent infinite loops while allowing reasonable execution time
-6. **Use `module_sandbox` sparingly**: Only when you need persistent state across tests
-7. **Block prohibited functions**: Use the setup code to prevent students from using disallowed functions
-   (like in the `la.inv = not_allowed` example above)
-8. **Configure security restrictions**: Use `import_whitelist` and `builtin_whitelist` in `server.py`
-   to control what modules and functions students can access, preventing security issues and
-   enforcing pedagogical constraints
-9. **Watch for `__main__` blocks**: Student code runs with `__name__ == "__main__"`, so code under
-   `if __name__ == "__main__":` runs during grading
-10. **Use friendly messages that don't give away answers**: A bare `assert` or a numpy testing
-    assertion shows the expected value to students. Use `assert_true(condition, msg=...)` for
-    hidden test cases
-
----
-
 ## Ungradable Submission Detection
 
 When student code has a **SyntaxError** (e.g., missing colons, unmatched brackets, bad indentation),
 the grader automatically marks the submission as **ungradable**. This means:
 
 - The student does **not** lose a grading attempt
-- They see a clear message: *"Your code could not be parsed. Please fix the syntax errors and resubmit."*
+- They see a clear message: _"Your code could not be parsed. Please fix the syntax errors and resubmit."_
 - The `format_errors` field in results contains the specific error
 
 This is especially useful for introductory courses where students may accidentally submit code
@@ -1250,8 +1338,6 @@ autograder_config = ConfigObject(
 The grader also detects when **test files themselves** fail to collect (e.g., import errors in
 your test code, missing dependencies). These are marked as ungradable with a message directing
 course staff to check the logs — students are never penalized for grader bugs.
-
----
 
 ## Jupyter Notebook Grading
 
@@ -1367,6 +1453,7 @@ import pytest
 import numpy as np
 
 from pytest_prairielearn_grader import ConfigObject
+from pytest_prairielearn_grader.assertions import assert_equal, assert_true
 from pytest_prairielearn_grader.fixture import FeedbackFixture, StudentFixture
 
 autograder_config = ConfigObject(
@@ -1386,7 +1473,7 @@ def test_solve(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
     feedback.set_score(0.5)
 
     expected = np.linalg.solve(A, b)
-    assert np.allclose(result, expected), f"Expected {expected}, got {result}"
+    assert_true(np.allclose(result, expected), msg="solve(A, b) is inaccurate")
     feedback.set_score(1.0)
 
 
@@ -1394,7 +1481,7 @@ def test_solve(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
 def test_result_variable(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
     feedback.set_score(0.0)
     x = sandbox.query("x")
-    assert x is not None, "Variable 'x' was not defined"
+    assert_true(x is not None, msg="Variable 'x' was not defined")
     feedback.set_score(1.0)
 ```
 
@@ -1419,8 +1506,6 @@ questions/my_notebook_question/
     └── test_student/
         └── notebook.ipynb     # local stand-in for the student's submission
 ```
-
----
 
 ## Workspace Grading
 
@@ -1516,6 +1601,7 @@ Use `workspace_sandbox` and query student code with **dotted module paths**:
 
 ```python
 from pytest_prairielearn_grader import ConfigObject
+from pytest_prairielearn_grader.assertions import assert_equal, assert_true
 from pytest_prairielearn_grader.fixture import WorkspaceFixture
 import pytest
 
@@ -1527,19 +1613,19 @@ autograder_config = ConfigObject(
 @pytest.mark.grading_data(name="Add two numbers", points=2)
 def test_add(workspace_sandbox: WorkspaceFixture) -> None:
     result = workspace_sandbox.query_function("calculator.add", 3, 4)
-    assert result == 7
+    assert_equal(result, 7)
 
 
 @pytest.mark.grading_data(name="Clamp from sub-package", points=2)
 def test_clamp(workspace_sandbox: WorkspaceFixture) -> None:
     result = workspace_sandbox.query_function("utils.helpers.clamp", 15, 0, 10)
-    assert result == 10
+    assert_equal(result, 10)
 
 
 @pytest.mark.grading_data(name="Module-level constant", points=1)
 def test_constant(workspace_sandbox: WorkspaceFixture) -> None:
     pi = workspace_sandbox.query("calculator.PI_APPROX")
-    assert abs(pi - 3.14159) < 1e-5
+    assert_true(abs(pi - 3.14159) < 1e-5)
 ```
 
 The dotted path is split on the **last dot**: `"calculator.add"` imports the module `calculator`
@@ -1564,8 +1650,8 @@ result = workspace_sandbox.query_function("models.Classifier.predict", X_test)
 
 # query_function_raw — inspects the full response without raising
 response = workspace_sandbox.query_function_raw("calculator.divide", 1, 0)
-assert response["status"] == "exception"
-assert response["exception_name"] == "ValueError"
+assert_equal(response["status"], "exception")
+assert_equal(response["exception_name"], "ValueError")
 ```
 
 ### Optional: Entry-Point Execution
@@ -1583,7 +1669,7 @@ autograder_config = ConfigObject(
 # Now the sandbox namespace includes everything main.py defined at module level
 def test_global_state(workspace_sandbox: WorkspaceFixture) -> None:
     db = workspace_sandbox.query("database")  # flat name - set by main.py via exec
-    assert db is not None
+    assert_true(db is not None)
 ```
 
 Without `workspace_exec_entry` (the default), no file is executed at startup and all access
@@ -1672,6 +1758,7 @@ autograder_config = ConfigObject(
 import pytest
 
 from pytest_prairielearn_grader import ConfigObject
+from pytest_prairielearn_grader.assertions import assert_equal, assert_true
 from pytest_prairielearn_grader.fixture import FeedbackFixture, WorkspaceFixture
 
 autograder_config = ConfigObject(
@@ -1686,30 +1773,31 @@ def test_add(workspace_sandbox: WorkspaceFixture, feedback: FeedbackFixture) -> 
     feedback.set_score(0.0)
 
     response = workspace_sandbox.query_function_raw("calculator.add", 2, 3)
-    assert response["status"] != "not_found", "calculator.add is not defined"
+    assert_true(response["status"] != "not_found", msg="calculator.add is not defined")
     feedback.set_score(0.5)
 
-    assert response["status"] == "success", (
-        f"calculator.add raised {response['exception_name']}: {response['exception_message']}"
+    assert_true(
+        response["status"] == "success",
+        msg=f"calculator.add raised {response['exception_name']}: {response['exception_message']}",
     )
     feedback.set_score(0.8)
 
-    assert response["value"] == 5, f"Expected 5, got {response['value']}"
+    assert_equal(response["value"], 5, description="calculator.add(2, 3)")
     feedback.set_score(1.0)
 
 
 @pytest.mark.grading_data(name="divide() raises ValueError on zero", points=2)
 def test_divide_guard(workspace_sandbox: WorkspaceFixture) -> None:
     response = workspace_sandbox.query_function_raw("calculator.divide", 10, 0)
-    assert response["status"] == "exception", "divide() should raise on zero denominator"
-    assert response["exception_name"] == "ValueError"
+    assert_true(response["status"] == "exception", msg="divide() should raise on zero denominator")
+    assert_equal(response["exception_name"], "ValueError")
 
 
 @pytest.mark.grading_data(name="PI_APPROX constant exists", points=1)
 def test_constant(workspace_sandbox: WorkspaceFixture) -> None:
     pi = workspace_sandbox.query("calculator.PI_APPROX")
-    assert isinstance(pi, float), "PI_APPROX should be a float"
-    assert abs(pi - 3.14) < 0.01
+    assert_true(isinstance(pi, float), msg="PI_APPROX should be a float")
+    assert_true(abs(pi - 3.14) < 0.01)
 ```
 
 **Student workspace (`student/calculator.py`):**
@@ -1725,3 +1813,27 @@ def divide(a, b):
         raise ValueError("Cannot divide by zero")
     return a / b
 ```
+
+## More Examples
+
+To see more examples of what is possible in these test files, look at the test cases in
+[this folder](https://github.com/prairielearn/grader-python-v2/tree/main/tests/scenario_root). Each test file is called `scenario.py`.
+
+## Tips and Best Practices
+
+1. **Keep code in the tests**: See [Where Code Belongs](#where-code-belongs).
+2. **Use descriptive test names**: The `name` in `@pytest.mark.grading_data` is shown to students.
+3. **Use friendly messages that don't give away answers**: Use the assertion helpers with the
+   `friendly` output level, and `assert_true` for hidden test cases.
+4. **Test incrementally**: Break complex problems into smaller tests with partial credit.
+5. **Prefer `parametrize`**: Use `@pytest.mark.parametrize` for several inputs instead of a loop,
+   unless the inputs share partial credit.
+6. **Control output visibility**: Use `include_stdout_feedback=False` for tests where student output
+   would be confusing or reveal answers.
+7. **Set appropriate timeouts**: Student code that imports numpy or pandas usually needs a
+   `sandbox_timeout` of several seconds.
+8. **Use `module_sandbox` sparingly**: Only when you need persistent state across tests.
+9. **Watch for `__main__` blocks**: Student code runs with `__name__ == "__main__"`, so code under
+   `if __name__ == "__main__":` runs during grading.
+10. **Configure security restrictions**: Use `import_whitelist`, `import_blacklist` and
+    `builtin_whitelist` to control what modules and functions students can access.
