@@ -5,8 +5,9 @@ covers the basic usage and functionality with examples. The grader uses the Dock
 `prairielearn/grader-python-pytest:latest` which is powered by the `pytest-prairielearn-grader`
 pytest plugin.
 
-The following discussion is based on converted example questions in PrairieLearn.
-For a real example, see: https://github.com/PrairieLearn/PrairieLearn/pull/12603
+The following discussion is based on converted example questions in PrairieLearn. To convert a
+question from the legacy Python grader, follow [converting.md](converting.md), which also lists
+example questions to compare against.
 
 ## Editor Setup
 
@@ -28,8 +29,17 @@ The required file structure for a PrairieLearn question using this grader is:
 - tests/
   ├── initial_code.py      (optional: starter code for students)
   ├── setup_code.py        (optional: test setup and parameters)
+  ├── leading_code.py      (optional: code prepended to the student's code)
+  ├── trailing_code.py     (optional: code appended to the student's code)
   └── test_student.py      (required: test cases)
 ```
+
+`leading_code.py` and `trailing_code.py` run in the same namespace as the student's code, so
+student code can use anything that `leading_code.py` defines. The grader doesn't read
+`initial_code.py`. It's only used by the file editor in `question.html`.
+
+`test_student.py` can't import the other files in `tests/`. To share code with the sandbox, see
+[Helper Modules](#helper-modules). To read a data file in a test, use the `tests_dir` fixture.
 
 **Important**: The file editor element in `question.html` should have `file-name="student_code.py"`.
 The autograder looks for `student_code.py` by default. You can customize this by setting
@@ -80,6 +90,16 @@ la.pinv = not_allowed
 In this example, only `A`, `b`, and `n` (specified in `names_for_user`) are accessible in the
 student code. The function blocking demonstrates how to prevent students from using certain
 library functions.
+
+Setup code runs in the sandbox before the student's code, with the same builtins and import
+restrictions. For example, it can't call `open` or import `os`. To read a data file, list it in
+[`data_files`](#data-files). Parameters that `server.py` stored with `pl.to_json` are still encoded
+in `__data_params`. Decode them with `__from_server_json`, for example
+`A = __from_server_json(__data_params["A"])`.
+
+With the `sandbox` fixture, setup code and student code run again for each test, so random values
+in setup code differ between tests. To use a setup value in a test, read it in that test with
+[`sandbox.query_setup`](#5-query-setup-variables).
 
 ## Test Cases (`test_student.py`)
 
@@ -266,6 +286,16 @@ Control execution time for individual function calls:
 # Set a 2-second timeout for this specific function call
 result = sandbox.query_function("slow_computation", data, query_timeout=2.0)
 ```
+
+### 5. Query Setup Variables
+
+```python
+x = sandbox.query_setup("x")
+```
+
+Retrieves a variable defined by `setup_code.py`, whether or not it's in `names_for_user`. The value
+comes from the same sandbox as the student's code, so a random value matches the one the student's
+code received.
 
 **Note**: Student code must define the queried symbols, and return values must be JSON-serializable.
 Supported types include: `int`, `float`, `str`, `list`, `dict`, `bool`, `None`, numpy arrays, pandas DataFrames,
@@ -766,14 +796,15 @@ Variable queries via `sandbox.query()` do not have timeouts since they're simple
 
 #### Module-level Default Timeout
 
-Set a default timeout for sandbox initialization in all tests in a file:
+Set a default timeout for sandbox initialization in all tests in a file. This variable and the
+`sandbox_timeout` marker below are ignored when the file has an `autograder_config`, so use
+`ConfigObject(sandbox_timeout=...)` there instead.
 
 ```python
-# At the top of test_student.py (before imports)
-initialization_timeout = 2.0  # 2 second timeout for initialization
-
 import pytest
 from pytest_prairielearn_grader.fixture import StudentFixture
+
+sandbox_timeout = 2.0  # 2 second timeout for initialization
 
 
 @pytest.mark.grading_data(name="Test 1", points=1)
@@ -1162,6 +1193,11 @@ Pinned version tags (e.g., `:v1.2.3` and `:v1.2.3-lite`) are also published alon
 8. **Configure security restrictions**: Use `import_whitelist` and `builtin_whitelist` in `server.py`
    to control what modules and functions students can access, preventing security issues and
    enforcing pedagogical constraints
+9. **Watch for `__main__` blocks**: Student code runs with `__name__ == "__main__"`, so code under
+   `if __name__ == "__main__":` runs during grading
+10. **Use friendly messages that don't give away answers**: A bare `assert` or a numpy testing
+    assertion shows the expected value to students. Use `assert_true(condition, msg=...)` for
+    hidden test cases
 
 ---
 
