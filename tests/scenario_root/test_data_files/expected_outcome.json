@@ -1,0 +1,38 @@
+{
+  "expected_data_object": {
+    "score": 1.0,
+    "tests": [
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "relative paths",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_data_files.py::test_relative_paths[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "copies are read-only",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_data_files.py::test_copies_read_only[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "module sandbox",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_data_files.py::test_module_sandbox[student_code]"
+      }
+    ]
+  },
+  "expected_outcome": {
+    "passed": 3,
+    "failed": 0
+  }
+}

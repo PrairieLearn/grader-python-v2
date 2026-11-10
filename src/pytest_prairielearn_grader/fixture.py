@@ -1,9 +1,12 @@
 import json
 import logging
 import os
+import shutil
 import socket
+import stat
 import subprocess
 import sys
+import tempfile
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -32,6 +35,13 @@ DataFixture = dict[str, Any]
 
 SCRIPT_PATH = str(files("pytest_prairielearn_grader").joinpath("_student_code_runner.py"))
 DEFAULT_TIMEOUT = 1.0
+
+# Modes for the data files folder (see _make_data_files_dir). Everyone can read the files and list the
+# folders, and nobody can change them; only the owner (root, in the Docker image) can make them writable again.
+_READ_ONLY_FILE_MODE = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH  # r--r--r--
+_READ_ONLY_DIR_MODE = _READ_ONLY_FILE_MODE | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH  # r-xr-xr-x
+# Lets the owner delete the folder's contents at cleanup.
+_OWNER_WRITABLE_DIR_MODE = _READ_ONLY_DIR_MODE | stat.S_IWUSR  # rwxr-xr-x
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +84,33 @@ def _extract_notebook_code(notebook_path: Path, cell_tag: str | None = None) -> 
         code_parts.append(source)
 
     return "\n\n".join(code_parts)
+
+
+def _make_data_files_dir(data_files: dict[str, Path]) -> Path:
+    """Copy each data file to its relative path in a new folder that only its owner can change.
+
+    The folder is made by the grader process, so in the Docker image it's owned by root and the
+    sandbox user can read the copies but not change, add or remove anything.
+    """
+    root = Path(tempfile.mkdtemp(prefix="pl-data-files-"))
+    try:
+        for relative_path, source in data_files.items():
+            destination = root / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            destination.chmod(_READ_ONLY_FILE_MODE)
+        for directory in [root, *(path for path in root.rglob("*") if path.is_dir())]:
+            directory.chmod(_READ_ONLY_DIR_MODE)
+    except BaseException:
+        _remove_data_files_dir(root)
+        raise
+    return root
+
+
+def _remove_data_files_dir(root: Path) -> None:
+    for directory in [root, *(path for path in root.rglob("*") if path.is_dir())]:
+        directory.chmod(_OWNER_WRITABLE_DIR_MODE)
+    shutil.rmtree(root, ignore_errors=True)
 
 
 class StudentFiles(NamedTuple):
@@ -139,6 +176,8 @@ class _SandboxBase:
     builtin_whitelist: list[str] | None
     names_for_user_list: list[str] | None
     worker_username: str | None
+    data_files: dict[str, Path] | None
+    _data_files_dir: Path | None
     _accumulated_stdout: list[str]
     _server_failure: str | None
 
@@ -150,6 +189,7 @@ class _SandboxBase:
         builtin_whitelist: list[str] | None,
         names_for_user_list: list[str] | None,
         worker_username: str | None,
+        data_files: dict[str, Path] | None = None,
     ) -> None:
         self.import_whitelist = import_whitelist
         self.import_blacklist = import_blacklist
@@ -157,6 +197,8 @@ class _SandboxBase:
         self.builtin_whitelist = builtin_whitelist
         self.names_for_user_list = names_for_user_list
         self.worker_username = worker_username
+        self.data_files = data_files
+        self._data_files_dir = None
         self.process = None
         self.student_socket = None
         self._accumulated_stdout = []
@@ -213,11 +255,17 @@ class _SandboxBase:
             if self.worker_username is not None:
                 drop_privileges(self.worker_username)
 
+        # With data files, the sandbox starts in a folder holding copies of them, so student code can
+        # read them by relative path. Without them, the starting folder is left as it was.
+        if self.data_files is not None:
+            self._data_files_dir = _make_data_files_dir(self.data_files)
+
         self.process = subprocess.Popen(
             args=(sys.executable, SCRIPT_PATH),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            cwd=self._data_files_dir,
             preexec_fn=None if sys.platform == "win32" else try_drop_privileges,
         )
         self._assert_process_running()
@@ -337,6 +385,9 @@ class _SandboxBase:
             self.process.terminate()
             self.process.wait()
             self.process = None
+        if self._data_files_dir is not None:
+            _remove_data_files_dir(self._data_files_dir)
+            self._data_files_dir = None
 
 
 class StudentFixture(_SandboxBase):
@@ -356,8 +407,11 @@ class StudentFixture(_SandboxBase):
         worker_username: str | None,
         notebook_cell_tag: str | None = None,
         helper_modules: dict[str, str] | None = None,
+        data_files: dict[str, Path] | None = None,
     ) -> None:
-        super().__init__(import_whitelist, import_blacklist, starting_vars, builtin_whitelist, names_for_user_list, worker_username)
+        super().__init__(
+            import_whitelist, import_blacklist, starting_vars, builtin_whitelist, names_for_user_list, worker_username, data_files
+        )
         self.leading_file = file_names.leading_file
         self.trailing_file = file_names.trailing_file
         self.student_code_file = file_names.student_code_file
@@ -466,8 +520,11 @@ class WorkspaceFixture(_SandboxBase):
         worker_username: str | None,
         exec_entry: str | None = None,
         helper_modules: dict[str, str] | None = None,
+        data_files: dict[str, Path] | None = None,
     ) -> None:
-        super().__init__(import_whitelist, import_blacklist, starting_vars, builtin_whitelist, names_for_user_list, worker_username)
+        super().__init__(
+            import_whitelist, import_blacklist, starting_vars, builtin_whitelist, names_for_user_list, worker_username, data_files
+        )
         self.workspace_dir = workspace_dir
         self.setup_code_file = setup_code_file
         self.exec_entry = exec_entry

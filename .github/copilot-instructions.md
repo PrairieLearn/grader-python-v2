@@ -146,6 +146,10 @@ result = sandbox.query_function("student_func", arg1, arg2, timeout=5)
 these modules, so they must not contain answers. In workspace mode, their names are reserved: a student
 file or folder with one fails the submission with a message asking the student to rename it.
 
+`ConfigObject(data_files=["pagerank_large.txt"])` starts the sandbox in a new folder holding read-only
+copies of the listed tests-folder files, so code in the sandbox can read them by relative path. Tests read
+the originals through the `tests_dir` fixture. A missing listed file makes the submission ungradable.
+
 ### 5. Serialization
 
 - Uses `dill` for complex Python objects (numpy arrays, pandas DataFrames, matplotlib plots)

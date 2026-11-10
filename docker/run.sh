@@ -34,6 +34,15 @@ mv "$STUDENT_DIR" "$MERGE_DIR/test_student/student"
 mv $TEST_DIR/* $MERGE_DIR/test_student/
 mv $MERGE_DIR/test_student/test_student.py $MERGE_DIR/test_student.py
 
+# Student code runs as ag, whose uid may match the owner of files mounted from the host. Stop it from
+# changing the tests and the submission, since tests read them after student code has run (for
+# example, a data file the tests_dir fixture reads to compute expected values).
+if ! { chown -R root:root "$MERGE_DIR" && chmod -R go-w "$MERGE_DIR"; }; then
+    echo '{"succeeded": false, "score": 0.0, "message": "The autograder could not protect its grading files. Please contact course staff and have them check the logs for this submission."}' > "$OUT_DIR/results.json"
+    echo "ERROR: could not protect $MERGE_DIR"
+    exit 1
+fi
+
 # PrairieLearn writes data.json to the data directory, and pytest is told to read it from there.
 # It can hold correct_answers, so it's for the grader only. It must be owned by root with
 # owner-only modes: student code keeps root's supplementary groups, and its uid may match the owner

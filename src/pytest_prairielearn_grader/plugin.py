@@ -56,9 +56,13 @@ class TestResult(NamedTuple):
     stdout: str
 
 
-def get_datadir(test_module: ModuleType) -> Path | None:
+def get_tests_dir(test_module: ModuleType) -> Path | None:
     """
-    Get the data directory for the current test module.
+    Get the tests folder for a test module: the folder named after the module, next to it.
+
+    For /grade/run/test_student.py that's /grade/run/test_student/, which holds the question's
+    tests files (leading_code.py, helper modules, data files) and the student/ folder.
+    The tests_dir fixture exposes this to tests.
     """
 
     if test_module is None:
@@ -75,10 +79,7 @@ def get_datadir(test_module: ModuleType) -> Path | None:
     # Convert it to a pathlib.Path object for easier manipulation
     module_path = Path(module_filepath_str)
 
-    # Let's assume you have a 'data' directory next to your test file
-    data_dir = module_path.parent / module_path.stem
-
-    return data_dir
+    return module_path.parent / module_path.stem
 
 
 def _find_data_json(request: pytest.FixtureRequest) -> Path | None:
@@ -87,8 +88,8 @@ def _find_data_json(request: pytest.FixtureRequest) -> Path | None:
     if data_json_path is not None and Path(data_json_path).is_file():
         return Path(data_json_path)
 
-    datadir = get_datadir(request.module)
-    return None if datadir is None else datadir / "data.json"
+    tests_dir = get_tests_dir(request.module)
+    return None if tests_dir is None else tests_dir / "data.json"
 
 
 @pytest.fixture(scope="module")
@@ -106,11 +107,11 @@ def data_json(request: pytest.FixtureRequest) -> dict[str, Any] | None:
     except (OSError, ValueError) as e:
         raise RuntimeError(f"Could not load data.json: {e}") from e
 
-    # if datadir is None or not datadir.is_dir():
-    #     raise ValueError(f"Data directory '{datadir}' not found or is not a directory.")
+    # if tests_dir is None or not tests_dir.is_dir():
+    #     raise ValueError(f"Tests folder '{tests_dir}' not found or is not a directory.")
 
     # if not data_file.is_file():
-    #     raise ValueError(f"Data file '{data_file.name}' not found in '{datadir}'.")
+    #     raise ValueError(f"Data file '{data_file.name}' not found in '{tests_dir}'.")
 
 
 def _load_helper_modules(
@@ -127,10 +128,10 @@ def _load_helper_modules(
     if names is None:
         return None
 
-    data_dir = get_datadir(request.module)
+    tests_dir = get_tests_dir(request.module)
     sources: dict[str, str] = {}
     for name in names:
-        path = None if data_dir is None else data_dir / f"{name}.py"
+        path = None if tests_dir is None else tests_dir / f"{name}.py"
         try:
             if import_blacklist is not None and name in import_blacklist:
                 raise ValueError("it's also in import_blacklist, so it can't be imported")
@@ -143,6 +144,42 @@ def _load_helper_modules(
             request.config.result_collector_plugin.collection_errors.append(message)  # type: ignore[attr-defined]
             raise SandboxStartupFailed(message) from e
     return sources
+
+
+def _resolve_data_files(request: pytest.FixtureRequest, names: list[str] | None) -> dict[str, Path] | None:
+    """
+    Find each file named by the data_files setting in the tests folder.
+
+    A missing file is the instructor's to fix, so it makes the submission ungradable instead of
+    costing the student an attempt.
+    """
+    if names is None:
+        return None
+
+    tests_dir = get_tests_dir(request.module)
+    paths: dict[str, Path] = {}
+    for name in names:
+        path = None if tests_dir is None else tests_dir / name
+        if path is None or not path.is_file():
+            message = f"Autograder configuration error in data_files: can't use '{name}': {path} doesn't exist"
+            request.config.result_collector_plugin.collection_errors.append(message)  # type: ignore[attr-defined]
+            raise SandboxStartupFailed(message)
+        paths[name] = path
+    return paths
+
+
+@pytest.fixture(scope="module")
+def tests_dir(request: pytest.FixtureRequest) -> Path:
+    """
+    The question's tests folder, which holds leading_code.py, helper modules and data files.
+
+    Tests can read instructor files from it, for example to compute expected values from the
+    same data file that data_files gives the student: ``np.loadtxt(tests_dir / "data.txt")``.
+    """
+    path = get_tests_dir(request.module)
+    if path is None:
+        pytest.fail("tests_dir: the test module has no file, so its tests folder can't be found", pytrace=False)
+    return path
 
 
 def _initialize_sandbox_fixture(
@@ -174,6 +211,7 @@ def _initialize_sandbox_fixture(
     config_dict: dict[str, Any] = {}
     notebook_cell_tag: str | None = None
     helper_module_names: list[str] | None = None
+    data_file_names: list[str] | None = None
     if hasattr(request, "module") and hasattr(request.module, "autograder_config"):
         config_object = request.module.autograder_config
         if not isinstance(config_object, ConfigObject):
@@ -185,6 +223,7 @@ def _initialize_sandbox_fixture(
         config_starting_vars = config_object.starting_vars
         notebook_cell_tag = config_object.notebook_cell_tag
         helper_module_names = config_object.helper_modules
+        data_file_names = config_object.data_files
     else:
         # Check for module-level timeout variable (works for module-scoped fixtures)
         # This allows setting: sandbox_timeout = 0.5 at module level
@@ -247,6 +286,7 @@ def _initialize_sandbox_fixture(
         worker_username=request.config.getoption("--worker-username"),
         notebook_cell_tag=notebook_cell_tag,
         helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
+        data_files=_resolve_data_files(request, data_file_names),
     )
 
     return fixture, initialization_timeout
@@ -414,10 +454,10 @@ def sandbox(request: pytest.FixtureRequest, data_json: dict[str, Any] | None) ->
 def _find_student_files(module: ModuleType) -> list[StudentFiles]:
     """
     Find all student code files for a module and return StudentFiles objects.
-    Returns empty list if no data directory or no matching files found.
+    Returns empty list if no tests folder or no matching files found.
     """
-    data_dir = get_datadir(module)
-    if data_dir is None or not data_dir.is_dir():
+    tests_dir = get_tests_dir(module)
+    if tests_dir is None or not tests_dir.is_dir():
         return []
 
     # Check for ConfigObject first, then module-level pattern, then default
@@ -425,18 +465,18 @@ def _find_student_files(module: ModuleType) -> list[StudentFiles]:
         student_code_pattern = module.autograder_config.student_code_pattern
     else:
         student_code_pattern = getattr(module, "student_code_pattern", "student_code*.py")
-    logger.debug(f"Looking for student code files in {data_dir} with pattern '{student_code_pattern}'")
+    logger.debug(f"Looking for student code files in {tests_dir} with pattern '{student_code_pattern}'")
 
     # Set up file paths
-    leading_file = data_dir / "leading_code.py"
-    trailing_file = data_dir / "trailing_code.py"
-    setup_code_file = data_dir / "setup_code.py"
+    leading_file = tests_dir / "leading_code.py"
+    trailing_file = tests_dir / "trailing_code.py"
+    setup_code_file = tests_dir / "setup_code.py"
 
-    student_code_files = list(data_dir.glob(student_code_pattern))
+    student_code_files = list(tests_dir.glob(student_code_pattern))
     # Fall back to student/ subdirectory — matches the production Docker layout where
     # run.sh moves /grade/student → test_student/student/ as a whole directory.
     if not student_code_files:
-        student_subdir = data_dir / "student"
+        student_subdir = tests_dir / "student"
         if student_subdir.is_dir():
             student_code_files = list(student_subdir.glob(student_code_pattern))
     logger.debug(f"Found {len(student_code_files)} student code file(s): {[f.name for f in student_code_files]}")
@@ -451,8 +491,8 @@ def _find_workspace_dir(module: ModuleType) -> Path | None:
     Resolution order:
     1. ``autograder_config.workspace_student_dir`` if set as an absolute path.
     2. ``autograder_config.workspace_student_dir`` resolved relative to the
-       module's data directory (``<parent>/<stem>/``). if set as a relative path.
-    3. A sub-directory named ``"student"`` inside the module's data directory
+       module's tests folder (``<parent>/<stem>/``). if set as a relative path.
+    3. A sub-directory named ``"student"`` inside the module's tests folder
        (mirrors the ``/grade/student`` directory provided by PrairieLearn and
        the layout created by the pytester-based test runner).
     4. A sub-directory named ``"student"`` in the same directory as the test
@@ -466,10 +506,10 @@ def _find_workspace_dir(module: ModuleType) -> Path | None:
         p = Path(config_workspace_dir)
         if p.is_absolute():
             return p if p.is_dir() else None
-        # Relative path: try resolving from data_dir first, then module parent
-        data_dir = get_datadir(module)
-        if data_dir is not None:
-            resolved = data_dir / p
+        # Relative path: try resolving from tests_dir first, then module parent
+        tests_dir = get_tests_dir(module)
+        if tests_dir is not None:
+            resolved = tests_dir / p
             if resolved.is_dir():
                 return resolved
         module_file = getattr(module, "__file__", None)
@@ -483,9 +523,9 @@ def _find_workspace_dir(module: ModuleType) -> Path | None:
     # Check the data subdir first (matches the pytester layout used by the automated
     # scenario runner), then fall back to the module's own parent directory (the
     # natural layout when running a test file directly from its source location).
-    data_dir = get_datadir(module)
-    if data_dir is not None and data_dir.is_dir():
-        candidate = data_dir / "student"
+    tests_dir = get_tests_dir(module)
+    if tests_dir is not None and tests_dir.is_dir():
+        candidate = tests_dir / "student"
         if candidate.is_dir():
             return candidate
 
@@ -511,6 +551,7 @@ def _initialize_workspace_fixture(
     config_dict: dict[str, Any] = {}
     exec_entry: str | None = None
     helper_module_names: list[str] | None = None
+    data_file_names: list[str] | None = None
     if hasattr(request, "module") and hasattr(request.module, "autograder_config"):
         config_object = request.module.autograder_config
         if not isinstance(config_object, ConfigObject):
@@ -520,6 +561,7 @@ def _initialize_workspace_fixture(
         config_starting_vars = config_object.starting_vars
         exec_entry = config_object.workspace_exec_entry
         helper_module_names = config_object.helper_modules
+        data_file_names = config_object.data_files
     else:
         if hasattr(request, "module") and hasattr(request.module, "sandbox_timeout"):
             initialization_timeout = request.module.sandbox_timeout
@@ -551,9 +593,9 @@ def _initialize_workspace_fixture(
                 value = params_dict.get(name, None)
             starting_vars[name] = value
 
-    # Resolve setup_code_file from the test module's data directory
-    data_dir = get_datadir(request.module)
-    setup_code_file = (data_dir / "setup_code.py") if data_dir is not None else Path("setup_code.py")
+    # Resolve setup_code_file from the test module's tests folder
+    tests_dir = get_tests_dir(request.module)
+    setup_code_file = (tests_dir / "setup_code.py") if tests_dir is not None else Path("setup_code.py")
 
     fixture = WorkspaceFixture(
         workspace_dir=workspace_dir,
@@ -566,6 +608,7 @@ def _initialize_workspace_fixture(
         worker_username=request.config.getoption("--worker-username"),
         exec_entry=exec_entry,
         helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
+        data_files=_resolve_data_files(request, data_file_names),
     )
     return fixture, initialization_timeout
 

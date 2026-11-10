@@ -307,3 +307,55 @@ def test_helper_modules_cannot_be_empty() -> None:
 def test_helper_modules_in_workspace_mode() -> None:
     config = ConfigObject(workspace_mode=True, helper_modules=["helper_function"])
     assert config.helper_modules == ["helper_function"]
+
+
+# ---------------------------------------------------------------------------
+# data_files field
+# ---------------------------------------------------------------------------
+
+
+def test_data_files_default_is_none() -> None:
+    assert ConfigObject().data_files is None
+
+
+def test_data_files_valid() -> None:
+    names = ["pagerank_large.txt", "data/points.csv", ".hidden"]
+    assert ConfigObject(data_files=names).data_files == names
+
+
+def test_data_files_in_workspace_mode() -> None:
+    assert ConfigObject(workspace_mode=True, data_files=["a.txt"]).data_files == ["a.txt"]
+
+
+def test_data_files_not_in_params() -> None:
+    assert "data_files" not in ConfigObject(data_files=["a.txt"]).to_dict()
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["", " ", ".", "./", "..", "../ans.py", "data/../x.txt", "/grade/tests/a.txt", "a\\b", "..\\a.txt", "C:a.txt", "C:/a.txt", 5, None],
+)
+def test_data_files_rejects_invalid_paths(name: object) -> None:
+    with pytest.raises(ValueError, match="data_files must contain relative paths"):
+        ConfigObject(data_files=[name])  # type: ignore[list-item]
+
+
+def test_data_files_must_be_a_list() -> None:
+    with pytest.raises(TypeError, match="data_files must be a list"):
+        ConfigObject(data_files="a.txt")  # type: ignore[arg-type]
+
+
+def test_data_files_cannot_be_empty() -> None:
+    with pytest.raises(ValueError, match="data_files cannot be empty"):
+        ConfigObject(data_files=[])
+
+
+def test_data_files_normalizes_paths() -> None:
+    # "/" is the separator on every OS, and "." and repeated "/" parts are dropped.
+    assert ConfigObject(data_files=["./a.txt", "data//b.txt"]).data_files == ["./a.txt", "data//b.txt"]
+
+
+@pytest.mark.parametrize("names", [["a.txt", "a.txt"], ["a.txt", "./a.txt"], ["data/b.txt", "data//b.txt"]])
+def test_data_files_rejects_duplicates(names: list[str]) -> None:
+    with pytest.raises(ValueError, match="more than once"):
+        ConfigObject(data_files=names)
