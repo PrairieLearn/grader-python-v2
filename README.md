@@ -78,6 +78,7 @@ Available helpers:
 - `assert_fn_equal(sandbox, func_name, args=..., expected=...)` — call + compare
 - `assert_fn_approx_equal(sandbox, func_name, args=..., expected=...)` — call + approx compare
 - `assert_true(condition)` / `assert_false(condition)` — boolean checks
+- `assert_plot_equal(plot, expected)` — compare a matplotlib plot with a reference plot
 
 ### Ungradable Submission Detection
 

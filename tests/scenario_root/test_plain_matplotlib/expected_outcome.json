@@ -1,6 +1,6 @@
 {
   "expected_data_object": {
-    "score": 0.8571428571428571,
+    "score": 0.7777777777777778,
     "tests": [
       {
         "max_points": 1,
@@ -62,6 +62,23 @@
           "Your plot",
           null
         ]
+      },
+      {
+        "max_points": 1,
+        "name": "assert_plot_equal",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_plain_matplotlib.py::test_assert_plot_equal[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "assert_plot_equal_message",
+        "points": 0.0,
+        "points_frac": 0.0,
+        "outcome": "failed",
+        "test_id": "test_plain_matplotlib.py::test_assert_plot_equal_message[student_code]",
+        "message": "Expected a log scale on the y-axis of your plot, but found a linear scale."
       }
     ]
   }
