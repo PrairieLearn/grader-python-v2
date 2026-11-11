@@ -303,6 +303,7 @@ def test_with_partial_credit(sandbox: StudentFixture, feedback: FeedbackFixture)
 - `feedback.set_score(fraction)`: Set partial credit (0.0 to 1.0)
 - `feedback.set_score_final(fraction)`: Set final score (prevents further updates)
 - `feedback.add_message(msg)`: Add custom feedback message
+- `feedback.add_image(image, label=None)`: Show an image with the test's results. See [Showing Plots to Students](#showing-plots-to-students)
 
 ## Advanced Features
 
@@ -1107,6 +1108,28 @@ def test_student_plot(sandbox: StudentFixture) -> None:
     pt.assert_axis_label_contains(axis="y", strings_expected=["Value"])
     pt.assert_title_contains(["Data Visualization"])
 ```
+
+#### Showing Plots to Students
+
+To show the student's plot with a test's results, pass it to `feedback.add_image`:
+
+```python
+@pytest.mark.grading_data(name="Plot Test", points=5)
+def test_student_plot(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
+    plot = sandbox.query_function("create_plot", data)
+    feedback.add_image(plot, label="Your plot")
+    ...
+```
+
+- **Values:** `add_image` takes a matplotlib `Figure` or `Axes`, or the bytes of a PNG file, and
+  adds it to the test's `images` in `results.json`. `<pl-external-grader-results>` shows it under
+  the test, whether the test passes or fails.
+- **Call it first:** a failed assertion ends the test, so add the image before checking the plot.
+- **A copy of the plot:** the image is drawn from the `Figure` that the test received, which the
+  grader rebuilt from the student's plot. It shows the data, scales, labels and other parts the
+  grader copies, but other styling can look different from what the student saw.
+- **Size:** PrairieLearn limits the whole `results.json` to 1 MB. A typical plot is tens of
+  kilobytes, but don't add an image in every case of a test with many parameters.
 
 The grader automatically serializes/deserializes:
 

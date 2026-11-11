@@ -6,6 +6,7 @@ from matplotcheck.base import PlotTester
 from matplotlib.figure import Figure
 
 from pytest_prairielearn_grader.assertions import assert_true
+from pytest_prairielearn_grader.fixture import FeedbackFixture
 from pytest_prairielearn_grader.fixture import StudentFixture
 from pytest_prairielearn_grader.utils import GradingOutputLevel
 from pytest_prairielearn_grader.utils import QueryStatusCode
@@ -74,3 +75,9 @@ def test_rejected_plot_keeps_sandbox_usable(sandbox: StudentFixture) -> None:
 @pytest.mark.grading_data(name="rejected_message", points=1)
 def test_rejected_plot_shows_clear_message(sandbox: StudentFixture) -> None:
     assert_true(isinstance(sandbox.query("errorbar_plot"), Figure), msg="plot is not a Figure")
+
+
+@pytest.mark.grading_data(name="add_image", points=1)
+def test_add_image(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
+    feedback.add_image(sandbox.query("plot"), label="Your plot")
+    feedback.add_image(sandbox.query_function("make_axes"))

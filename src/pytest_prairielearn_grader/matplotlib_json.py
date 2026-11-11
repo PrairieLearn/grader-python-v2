@@ -8,6 +8,7 @@ than losing data. Rebuilding only passes validated strings and numbers to matplo
 matplotlib is an optional dependency, so json_utils only imports this module when it's needed.
 """
 
+import io
 import math
 from typing import Any
 
@@ -38,6 +39,17 @@ class UnsupportedPlotError(ValueError):
 
 def is_plot(value: Any) -> bool:
     return isinstance(value, Axes | Figure)
+
+
+def plot_to_png(value: Any) -> bytes:
+    """Render a Figure, or the figure that an Axes belongs to, as a PNG file."""
+    if isinstance(value, Axes):
+        value = value.figure
+    if not isinstance(value, Figure):
+        raise TypeError(f"add_image expects a matplotlib Figure or Axes, or PNG bytes, not {type(value).__name__}")
+    buffer = io.BytesIO()
+    value.savefig(buffer, format="png")
+    return buffer.getvalue()
 
 
 def plot_to_json(value: Any) -> dict[str, Any]:
