@@ -18,8 +18,8 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
 
-@dataclass
-class _Series:
+@dataclass(frozen=True, slots=True)
+class Series:
     kind: str
     label: str
     data: list[np.ndarray]
@@ -33,8 +33,8 @@ class _Series:
         return bool(self.label) and not self.label.startswith("_")
 
 
-@dataclass
-class _Options:
+@dataclass(frozen=True, slots=True)
+class Options:
     name: str
     rtol: float
     atol: float
@@ -49,18 +49,18 @@ class _Options:
     check_styles: bool
 
 
-class _Mismatch(Exception):
+class Mismatch(Exception):
     pass
 
 
 def plot_mismatch(plot: Any, expected: Any, **options: Any) -> str | None:
     """Return a message describing how plot differs from expected, or None if they match."""
-    opts = _Options(**options)
+    opts = Options(**options)
     if not isinstance(expected, Axes | Figure):
         raise TypeError(f"assert_plot_equal expects a matplotlib Figure or Axes as the reference plot, not {type(expected).__name__}")
     try:
         _compare(plot, expected, opts)
-    except _Mismatch as e:
+    except Mismatch as e:
         return str(e)
     return None
 
@@ -73,20 +73,20 @@ def _plural(count: int, word: str) -> str:
     return f"{count} {word}" if count == 1 else f"{count} {word}s"
 
 
-def _compare(plot: Any, expected: Any, opts: _Options) -> None:
+def _compare(plot: Any, expected: Any, opts: Options) -> None:
     if not isinstance(plot, Axes | Figure):
-        raise _Mismatch(f"Expected {opts.name} to be a Matplotlib plot, such as plt.gca(), but found {type(plot).__name__}.")
+        raise Mismatch(f"Expected {opts.name} to be a Matplotlib plot, such as plt.gca(), but found {type(plot).__name__}.")
 
     plot_axes = _axes_of(plot)
     expected_axes = _axes_of(expected)
     if len(plot_axes) != len(expected_axes):
-        raise _Mismatch(f"Expected {_plural(len(expected_axes), 'set')} of axes in {opts.name}, but found {len(plot_axes)}.")
+        raise Mismatch(f"Expected {_plural(len(expected_axes), 'set')} of axes in {opts.name}, but found {len(plot_axes)}.")
 
     if opts.check_titles:
         actual_title = _figure_of(plot).get_suptitle()
         expected_title = _figure_of(expected).get_suptitle()
         if actual_title != expected_title:
-            raise _Mismatch(f"Expected the figure title {expected_title!r} in {opts.name}, but found {actual_title!r}.")
+            raise Mismatch(f"Expected the figure title {expected_title!r} in {opts.name}, but found {actual_title!r}.")
 
     for index, (actual, reference) in enumerate(zip(plot_axes, expected_axes, strict=True)):
         where = opts.name if len(expected_axes) == 1 else f"subplot {index + 1} of {opts.name}"
@@ -97,13 +97,13 @@ def _figure_of(value: Any) -> Any:
     return value.figure if isinstance(value, Axes) else value
 
 
-def _compare_axes(actual: Any, reference: Any, where: str, opts: _Options) -> None:
+def _compare_axes(actual: Any, reference: Any, where: str, opts: Options) -> None:
     if opts.check_scales:
         for axis in ("x", "y"):
             actual_scale = getattr(actual, f"get_{axis}scale")()
             expected_scale = getattr(reference, f"get_{axis}scale")()
             if actual_scale != expected_scale:
-                raise _Mismatch(f"Expected a {expected_scale} scale on the {axis}-axis of {where}, but found a {actual_scale} scale.")
+                raise Mismatch(f"Expected a {expected_scale} scale on the {axis}-axis of {where}, but found a {actual_scale} scale.")
 
     if opts.check_data or opts.check_styles:
         for kind, extract in (("line", _lines), ("scatter plot", _scatters), ("bar plot", _bars)):
@@ -114,7 +114,7 @@ def _compare_axes(actual: Any, reference: Any, where: str, opts: _Options) -> No
             actual_limits = getattr(actual, f"get_{axis}lim")()
             expected_limits = getattr(reference, f"get_{axis}lim")()
             if not np.allclose(actual_limits, expected_limits, rtol=opts.rtol, atol=opts.atol):
-                raise _Mismatch(
+                raise Mismatch(
                     f"Expected {axis}-axis limits {_format_limits(expected_limits)} in {where}, but found {_format_limits(actual_limits)}."
                 )
 
@@ -123,7 +123,7 @@ def _compare_axes(actual: Any, reference: Any, where: str, opts: _Options) -> No
             actual_label = getattr(actual, f"get_{axis}label")()
             expected_label = getattr(reference, f"get_{axis}label")()
             if actual_label != expected_label:
-                raise _Mismatch(f"Expected the {axis}-axis label {expected_label!r} in {where}, but found {actual_label!r}.")
+                raise Mismatch(f"Expected the {axis}-axis label {expected_label!r} in {where}, but found {actual_label!r}.")
 
     if opts.check_titles:
         for location in ("center", "left", "right"):
@@ -131,7 +131,7 @@ def _compare_axes(actual: Any, reference: Any, where: str, opts: _Options) -> No
             expected_title = reference.get_title(loc=location)
             if actual_title != expected_title:
                 title = "title" if location == "center" else f"{location} title"
-                raise _Mismatch(f"Expected the {title} {expected_title!r} in {where}, but found {actual_title!r}.")
+                raise Mismatch(f"Expected the {title} {expected_title!r} in {where}, but found {actual_title!r}.")
 
     if opts.check_legend:
         actual_legend = _legend(actual)
@@ -140,7 +140,7 @@ def _compare_axes(actual: Any, reference: Any, where: str, opts: _Options) -> No
             actual_legend = (actual_legend[0], sorted(actual_legend[1]))
             expected_legend = (expected_legend[0], sorted(expected_legend[1]))
         if actual_legend != expected_legend:
-            raise _Mismatch(f"Expected {_describe_legend(expected_legend)} in {where}, but found {_describe_legend(actual_legend)}.")
+            raise Mismatch(f"Expected {_describe_legend(expected_legend)} in {where}, but found {_describe_legend(actual_legend)}.")
 
 
 def _format_limits(limits: Any) -> str:
@@ -171,9 +171,9 @@ def _hex(color: Any) -> str:
     return to_hex(color, keep_alpha=True)
 
 
-def _lines(axes: Any) -> list[_Series]:
+def _lines(axes: Any) -> list[Series]:
     return [
-        _Series(
+        Series(
             kind="line",
             label=str(line.get_label()),
             data=[_floats(line.get_xdata(orig=False)), _floats(line.get_ydata(orig=False))],
@@ -195,7 +195,7 @@ def _sorted_points(columns: list[np.ndarray], colors: list[str]) -> tuple[list[n
     return [column[order] for column in columns], [colors[i] for i in order]
 
 
-def _scatters(axes: Any) -> list[_Series]:
+def _scatters(axes: Any) -> list[Series]:
     series = []
     for collection in axes.collections:
         if type(collection) is not PathCollection:
@@ -206,12 +206,12 @@ def _scatters(axes: Any) -> list[_Series]:
         colors = [_hex(facecolors[i % len(facecolors)]) for i in range(count)] if len(facecolors) else ["none"] * count
         data, colors = _sorted_points([offsets[:, 0], offsets[:, 1]], colors)
         series.append(
-            _Series(kind="scatter plot", label=str(collection.get_label()), data=data, reversible=False, styles={"colors": colors})
+            Series(kind="scatter plot", label=str(collection.get_label()), data=data, reversible=False, styles={"colors": colors})
         )
     return series
 
 
-def _bars(axes: Any) -> list[_Series]:
+def _bars(axes: Any) -> list[Series]:
     series = []
     # Typed as Any because the matplotlib stubs don't let get_label be called on a container.
     containers: list[Any] = [container for container in axes.containers if isinstance(container, BarContainer)]
@@ -225,7 +225,7 @@ def _bars(axes: Any) -> list[_Series]:
         ]
         data, colors = _sorted_points(columns, [_hex(patch.get_facecolor()) for patch in patches])
         series.append(
-            _Series(
+            Series(
                 kind="bar plot",
                 label=str(container.get_label()),
                 data=data,
@@ -236,7 +236,7 @@ def _bars(axes: Any) -> list[_Series]:
     return series
 
 
-def _data_matches(actual: _Series, expected: _Series, opts: _Options) -> bool:
+def _data_matches(actual: Series, expected: Series, opts: Options) -> bool:
     def close(columns: list[np.ndarray]) -> bool:
         return all(
             column.shape == reference.shape and np.allclose(column, reference, rtol=opts.rtol, atol=opts.atol, equal_nan=True)
@@ -250,12 +250,12 @@ def _data_matches(actual: _Series, expected: _Series, opts: _Options) -> bool:
     return expected.reversible and close([column[::-1] for column in actual.data])
 
 
-def _compare_series(actual: list[_Series], expected: list[_Series], kind: str, where: str, opts: _Options) -> None:
+def _compare_series(actual: list[Series], expected: list[Series], kind: str, where: str, opts: Options) -> None:
     if opts.allow_extra:
         if len(actual) < len(expected):
-            raise _Mismatch(f"Expected at least {_plural(len(expected), kind)} in {where}, but found {len(actual)}.")
+            raise Mismatch(f"Expected at least {_plural(len(expected), kind)} in {where}, but found {len(actual)}.")
     elif len(actual) != len(expected):
-        raise _Mismatch(f"Expected {_plural(len(expected), kind)} in {where}, but found {len(actual)}.")
+        raise Mismatch(f"Expected {_plural(len(expected), kind)} in {where}, but found {len(actual)}.")
 
     def describe(index: int) -> str:
         series = expected[index]
@@ -263,26 +263,28 @@ def _compare_series(actual: list[_Series], expected: list[_Series], kind: str, w
             return f"the {kind} labeled {series.label!r}"
         return f"the expected {kind}" if len(expected) == 1 else f"expected {kind} {index + 1}"
 
-    pairs: list[tuple[_Series, int]] = []
+    pairs: list[tuple[Series, int]] = []
     if opts.ordered:
         for index, series in enumerate(expected):
             if opts.check_data and not _data_matches(actual[index], series, opts):
-                raise _Mismatch(f"{kind.capitalize()} {index + 1} in {where} doesn't match {describe(index)}.")
+                raise Mismatch(f"{kind.capitalize()} {index + 1} in {where} doesn't match {describe(index)}.")
             pairs.append((actual[index], index))
     else:
         remaining = list(actual)
         for index, series in enumerate(expected):
-            match = next((candidate for candidate in remaining if not opts.check_data or _data_matches(candidate, series, opts)), None)
-            if match is None:
-                raise _Mismatch(f"No {kind} in {where} matches {describe(index)}.")
-            remaining.remove(match)
-            pairs.append((match, index))
+            position = next(
+                (i for i, candidate in enumerate(remaining) if not opts.check_data or _data_matches(candidate, series, opts)),
+                None,
+            )
+            if position is None:
+                raise Mismatch(f"No {kind} in {where} matches {describe(index)}.")
+            pairs.append((remaining.pop(position), index))
 
     if opts.check_styles:
         for match, index in pairs:
             for style, expected_value in expected[index].styles.items():
                 if match.styles[style] != expected_value:
-                    raise _Mismatch(
+                    raise Mismatch(
                         f"Expected {describe(index)} in {where} to have {style} {_format_style(expected_value)}, "
                         f"but found {_format_style(match.styles[style])}."
                     )

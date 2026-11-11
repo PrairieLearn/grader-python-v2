@@ -53,6 +53,12 @@ def full_plot(axes: Any) -> None:
         pytest.param(lambda a: a.semilogy(X, np.exp(X) * 1.01), semilogy, {"rtol": 0.02}, id="custom-tolerance"),
         pytest.param(lambda a: a.semilogy(X[::-1], np.exp(X[::-1])), semilogy, {}, id="reversed-line"),
         pytest.param(lambda a: (a.plot(X, X**2), a.plot(X, X)), two_lines, {}, id="lines-any-order"),
+        pytest.param(
+            lambda a: (a.plot(X, X**2, label="same"), a.plot(X, X, label="same")),
+            lambda a: (a.plot(X, X, label="same"), a.plot(X, X**2, label="same")),
+            {},
+            id="same-labels-any-order",
+        ),
         pytest.param(lambda a: a.scatter([2, 1, 3], [4, 2, 6]), lambda a: a.scatter([1, 2, 3], [2, 4, 6]), {}, id="scatter-any-order"),
         pytest.param(lambda a: a.bar([2, 1], [5, 4]), lambda a: a.bar([1, 2], [4, 5]), {}, id="bars-any-order"),
         pytest.param(lambda a: (semilogy(a), a.plot(X, X)), semilogy, {"allow_extra": True}, id="allow-extra"),
