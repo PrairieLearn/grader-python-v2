@@ -1,6 +1,6 @@
 {
   "expected_data_object": {
-    "score": 0.8333333333333334,
+    "score": 0.8571428571428571,
     "tests": [
       {
         "max_points": 1,
@@ -50,6 +50,18 @@
         "outcome": "failed",
         "test_id": "test_plain_matplotlib.py::test_rejected_plot_shows_clear_message[student_code]",
         "message": "errorbar plots aren't supported"
+      },
+      {
+        "max_points": 1,
+        "name": "add_image",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_plain_matplotlib.py::test_add_image[student_code]",
+        "images": [
+          "Your plot",
+          null
+        ]
       }
     ]
   }

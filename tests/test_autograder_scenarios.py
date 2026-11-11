@@ -183,6 +183,12 @@ def test_autograder_scenario_with_pytester(pytester: pytest.Pytester, scenario_d
                 f"Message mismatch for test '{test_id}'.\nassert {normalized_expected!r} in {normalized_actual!r}"
             )
 
+        # The expected images are their labels, since the PNG bytes depend on the matplotlib version.
+        if "images" in expected_test:
+            actual_images = actual_test.get("images", [])
+            assert [image.get("label") for image in actual_images] == expected_test["images"], f"Images mismatch for test '{test_id}'."
+            assert all(image["url"].startswith("data:image/png;base64,") for image in actual_images)
+
         assert actual_test["max_points"] == expected_test["max_points"], f"Max points mismatch for test '{test_id}'."
         assert math.isclose(expected_test["points_frac"], actual_test["points_frac"]), f"Points fraction mismatch for test '{test_id}'."
         assert math.isclose(expected_test["points"], actual_test["points"]), f"Points mismatch for test '{test_id}'."
