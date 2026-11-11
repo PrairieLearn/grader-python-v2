@@ -257,6 +257,29 @@ def get_builtins(builtin_whitelist: list[str] | None) -> dict[str, Any]:
         "min",
         "max",
         "map",
+        # Not in RestrictedPython's list, but they don't give student code anything that plain Python
+        # syntax doesn't. Courses commonly use them, and without them, correct solutions fail with a
+        # NameError.
+        "all",
+        "any",
+        "ascii",
+        "bin",
+        "bytearray",
+        "classmethod",
+        "Ellipsis",
+        "filter",
+        "format",
+        "frozenset",
+        "iter",
+        "next",
+        "NotImplemented",
+        "object",
+        "property",
+        "reversed",
+        "staticmethod",
+        "sum",
+        "super",
+        "type",
     )
 
     _safe_exceptions = (
