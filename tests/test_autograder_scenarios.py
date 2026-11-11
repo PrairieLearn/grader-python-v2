@@ -1,3 +1,4 @@
+import json
 import math
 import platform
 import shutil
@@ -9,7 +10,6 @@ import pytest
 
 pytest_plugins = ("pytester",)
 platform  # noqa: B018
-import json
 
 # --- Configuration ---
 # The root directory where your scenario folders are located
@@ -116,9 +116,7 @@ def test_autograder_scenario_with_pytester(pytester: pytest.Pytester, scenario_d
     # Check gradable field
     expected_gradable = expected_data_obj.get("gradable", True)
     actual_gradable = results_obj.get("gradable", True)
-    assert expected_gradable == actual_gradable, (
-        f"Gradable mismatch: expected {expected_gradable}, got {actual_gradable}"
-    )
+    assert expected_gradable == actual_gradable, f"Gradable mismatch: expected {expected_gradable}, got {actual_gradable}"
 
     # If submission is ungradable, check format_errors and message but skip score/test checks
     if not expected_gradable:

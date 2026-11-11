@@ -8,7 +8,7 @@ from plot_serializer.matplotlib.serializer import MatplotlibSerializer
 def create_line_plot():
     """Create a simple line plot with proper labels and title."""
     serializer = MatplotlibSerializer()
-    fig, ax = serializer.subplots()
+    _fig, ax = serializer.subplots()
     x = np.linspace(0, 2 * np.pi, 100)
     y = np.sin(x)
     ax.plot(x, y, label="sin(x)", color="blue", linewidth=2)
@@ -23,7 +23,7 @@ def create_line_plot():
 def create_scatter_plot():
     """Create a scatter plot with random data."""
     serializer = MatplotlibSerializer()
-    fig, ax = serializer.subplots()
+    _fig, ax = serializer.subplots()
     np.random.seed(42)
     x = np.random.randn(50)
     y = 2 * x + np.random.randn(50) * 0.5
@@ -37,7 +37,7 @@ def create_scatter_plot():
 def create_bar_chart():
     """Create a bar chart."""
     serializer = MatplotlibSerializer()
-    fig, ax = serializer.subplots()
+    _fig, ax = serializer.subplots()
     categories = ["A", "B", "C", "D"]
     values = [23, 45, 56, 78]
     ax.bar(categories, values, color=["red", "green", "blue", "yellow"])

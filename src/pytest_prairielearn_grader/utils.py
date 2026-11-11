@@ -207,7 +207,7 @@ def deserialize_object_unsafe(base64_string: str) -> object:
     dilled_bytes = base64.b64decode(base64_encoded_bytes)
 
     # 3. Deserialize the object using dill
-    return dill.loads(dilled_bytes)
+    return dill.loads(dilled_bytes)  # noqa: S301
 
 
 def get_builtins(builtin_whitelist: list[str] | None) -> dict[str, Any]:
@@ -331,7 +331,7 @@ def drop_privileges(user_name: str) -> None:
         raise NotImplementedError("Dropping privileges is not supported on Windows.")
 
     # pwd module is only available on Unix systems
-    import pwd
+    import pwd  # noqa: PLC0415
 
     try:
         # Get the UID and GID for the target user (e.g., 'nobody')
@@ -339,7 +339,7 @@ def drop_privileges(user_name: str) -> None:
         target_uid = pwnam.pw_uid
         target_gid = pwnam.pw_gid
     except KeyError:
-        raise ValueError(f"User '{user_name}' not found.")
+        raise ValueError(f"User '{user_name}' not found.") from None
 
     # 1. Set the real and effective GID
     # NOTE: Set GID before UID, as changing UID may restrict GID changes

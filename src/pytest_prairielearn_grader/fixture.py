@@ -63,7 +63,7 @@ def _extract_notebook_code(notebook_path: Path, cell_tag: str | None = None) -> 
         ImportError: If ``nbformat`` is not installed.
     """
     try:
-        import nbformat  # type: ignore[import-untyped]
+        import nbformat  # type: ignore[import-untyped]  # noqa: PLC0415
     except ImportError:
         raise ImportError(
             "nbformat is required for Jupyter notebook grading support. Install it with: pip install 'pytest-prairielearn-grader[notebook]'"
@@ -272,7 +272,8 @@ class _SandboxBase:
 
     def _connect_to_server(self, timeout: float) -> None:
         """Read the host/port printed by the subprocess and connect the socket."""
-        assert self.process is not None and self.process.stdout is not None
+        assert self.process is not None
+        assert self.process.stdout is not None
         host, port = self.process.stdout.readline().decode().strip().split(",")
         self.student_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.student_socket.settimeout(timeout)
