@@ -32,7 +32,6 @@ dev = [
     "pandas-stubs",
     "matplotlib-stubs",
     "matplotlib",
-    "plot-serializer",
     "matplotcheck2>=0.2.1",
     "networkx",
     "types-networkx",
@@ -125,5 +124,5 @@ exclude = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["sympy.*", "dill.*", "plot_serializer.*"]
+module = ["sympy.*", "dill.*"]
 ignore_missing_imports = true

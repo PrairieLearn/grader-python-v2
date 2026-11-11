@@ -126,7 +126,7 @@ import runpy
 from pathlib import Path
 import sys
 
-blocked = {"networkx", "numpy", "pandas", "plot_serializer"}
+blocked = {"matplotlib", "networkx", "numpy", "pandas"}
 original_import = builtins.__import__
 
 

@@ -56,11 +56,6 @@ def to_json(v: Any) -> Any:
 
         if is_plot(v):
             return plot_to_json(v)
-    elif module == "plot_serializer":
-        from plot_serializer.matplotlib.serializer import MatplotlibSerializer
-
-        if isinstance(v, MatplotlibSerializer):
-            return {"_type": "matplotlib_serializer", "_value": v.to_json()}
     else:
         return v
 
@@ -127,13 +122,6 @@ def from_json(v_json) -> Any:
                 return plot_from_json(v_json["_value"])
             else:
                 raise ValueError("variable of type matplotlib_figure should have value")
-        elif v_json["_type"] == "matplotlib_serializer":
-            from plot_serializer.matplotlib.deserializer import deserialize_from_json
-
-            if "_value" in v_json:
-                return deserialize_from_json(v_json["_value"])
-            else:
-                raise ValueError("variable of type matplotlib_serializer should have value")
         else:
             raise ValueError("variable has unknown type {}".format(v_json["_type"]))
     return v_json

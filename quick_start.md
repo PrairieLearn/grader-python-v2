@@ -1075,7 +1075,7 @@ Some details aren't sent, so don't grade them: grid lines, tick positions and la
 
 Importing matplotlib can take most of the default 1-second sandbox timeout, so set a longer one in plot questions, such as `sandbox_timeout = 15` at the top of the test file.
 
-Student code can instead build the plot with `MatplotlibSerializer` from the `plot-serializer` package and return the serializer, which also arrives as a `Figure`. `matplotlib` and `plot-serializer` are included in the `:latest` image but not in `:lite`.
+`matplotlib` is included in the `:latest` image but not in `:lite`.
 
 ```python
 # Test code
@@ -1110,7 +1110,7 @@ def test_student_plot(sandbox: StudentFixture) -> None:
 
 The grader automatically serializes/deserializes:
 
-- Matplotlib `Axes` and `Figure` values, and plots built with `MatplotlibSerializer` (received as a `Figure`)
+- Matplotlib `Axes` and `Figure` values (received as a `Figure`)
 - NumPy arrays
 - Pandas DataFrames
 - Standard Python types (int, float, str, list, dict, bool, None)
@@ -1145,7 +1145,7 @@ Two image variants are published. Pick the smallest one that includes what your 
 
 | Tag       | Size (approx.) | Includes                                                                                                                                                                                 | Best for                                                                                        |
 | --------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `:latest` | ~400–500 MB    | Full scientific stack: `numpy`, `pandas`, `scipy`, `matplotlib` + `matplotcheck2` + `plot-serializer`, `seaborn`, `scikit-learn`, `sympy`, `networkx`, `nltk`, `nbformat`, and more | Any course that needs scientific computing, data science, plotting, or Jupyter notebook grading |
+| `:latest` | ~400–500 MB    | Full scientific stack: `numpy`, `pandas`, `scipy`, `matplotlib` + `matplotcheck2`, `seaborn`, `scikit-learn`, `sympy`, `networkx`, `nltk`, `nbformat`, and more | Any course that needs scientific computing, data science, plotting, or Jupyter notebook grading |
 | `:lite`   | ~60–80 MB      | Grader core only: `pytest-prairielearn-grader`, `Pygments`, `beautifulsoup4`, `defusedxml`, `requests`                                                                                   | Introductory CS courses where student code uses only the Python standard library                |
 
 To use the lite image, change the `image` field:

@@ -24,11 +24,11 @@ from matplotlib.patches import Rectangle
 
 MATPLOTLIB_FIGURE_TYPE = "matplotlib_figure"
 
-_SCALES = {"linear", "log", "symlog", "logit"}
-_LINESTYLES = {"-", "--", "-.", ":", "None", " ", ""}
-_DRAWSTYLES = {"default", "steps", "steps-pre", "steps-mid", "steps-post"}
-_ORIENTATIONS = {"vertical", "horizontal"}
-_AXIS_UNITS = {"number", "date", "category"}
+_SCALES = frozenset({"linear", "log", "symlog", "logit"})
+_LINESTYLES = frozenset({"-", "--", "-.", ":", "None", " ", ""})
+_DRAWSTYLES = frozenset({"default", "steps", "steps-pre", "steps-mid", "steps-post"})
+_ORIENTATIONS = frozenset({"vertical", "horizontal"})
+_AXIS_UNITS = frozenset({"number", "date", "category"})
 _MAX_FIGURE_SIZE_INCHES = 1000.0
 
 
@@ -228,7 +228,7 @@ def _as_finite_number(value: Any, name: str) -> float:
     return number
 
 
-def _as_choice(value: Any, choices: set[str], name: str) -> str:
+def _as_choice(value: Any, choices: frozenset[str], name: str) -> str:
     if type(value) is not str or value not in choices:
         raise ValueError(f"{name} has an unsupported value")
     return value
