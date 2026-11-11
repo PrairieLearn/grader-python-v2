@@ -1082,37 +1082,6 @@ Importing matplotlib can take most of the default 1-second sandbox timeout, so s
 
 `matplotlib` is included in the `:latest` image but not in `:lite`.
 
-```python
-# Test code
-import matplotlib
-matplotlib.use("Agg")  # Non-GUI backend for server environments
-
-import pytest
-from matplotlib.figure import Figure
-from matplotcheck.base import PlotTester
-from pytest_prairielearn_grader.fixture import StudentFixture
-
-
-@pytest.mark.grading_data(name="Plot Test", points=5)
-def test_student_plot(sandbox: StudentFixture) -> None:
-    """Test that student creates a correct plot."""
-    # Student function returns an Axes or Figure, which arrives here as a Figure
-    plot = sandbox.query_function("create_plot", data)
-
-    assert isinstance(plot, Figure)
-    assert len(plot.axes) == 1
-
-    # Use matplotcheck for detailed plot testing
-    ax = plot.axes[0]
-    pt = PlotTester(ax)
-
-    # Check plot properties
-    pt.assert_plot_type("line")
-    pt.assert_axis_label_contains(axis="x", strings_expected=["Time"])
-    pt.assert_axis_label_contains(axis="y", strings_expected=["Value"])
-    pt.assert_title_contains(["Data Visualization"])
-```
-
 #### Comparing with a Reference Plot
 
 `assert_plot_equal` checks a student's plot against a reference plot that the test draws itself:
@@ -1169,9 +1138,43 @@ plot, but found a linear scale.` or `No line in your plot matches the line label
 are named by their labels when the reference has them. Use `name` to call the plot something else
 in messages, such as `name="plot"` for a variable, or `msg` to show your own message instead.
 
-Anything `assert_plot_equal` doesn't cover, such as checking that a label contains a word, can be
-checked directly on the `Figure`, or with `matplotcheck` as in the earlier example. Both can be
-used in the same test.
+#### Checking Plot Properties with matplotcheck
+
+For checks that `assert_plot_equal` doesn't cover, use the `Figure` directly or
+[matplotcheck](https://matplotcheck2.readthedocs.io/en/latest/), which is included in the `:latest`
+image. Its `PlotTester` can check that a label or title contains a word, histogram bins, the slope
+of a fitted line, and more. It can be used in the same test as `assert_plot_equal`:
+
+```python
+# Test code
+import matplotlib
+matplotlib.use("Agg")  # Non-GUI backend for server environments
+
+import pytest
+from matplotlib.figure import Figure
+from matplotcheck.base import PlotTester
+from pytest_prairielearn_grader.fixture import StudentFixture
+
+
+@pytest.mark.grading_data(name="Plot Test", points=5)
+def test_student_plot(sandbox: StudentFixture) -> None:
+    """Test that student creates a correct plot."""
+    # Student function returns an Axes or Figure, which arrives here as a Figure
+    plot = sandbox.query_function("create_plot", data)
+
+    assert isinstance(plot, Figure)
+    assert len(plot.axes) == 1
+
+    # Use matplotcheck for detailed plot testing
+    ax = plot.axes[0]
+    pt = PlotTester(ax)
+
+    # Check plot properties
+    pt.assert_plot_type("line")
+    pt.assert_axis_label_contains(axis="x", strings_expected=["Time"])
+    pt.assert_axis_label_contains(axis="y", strings_expected=["Value"])
+    pt.assert_title_contains(["Data Visualization"])
+```
 
 #### Showing Plots to Students
 
