@@ -311,7 +311,7 @@ When a `ConfigObject` is present, the module-level `sandbox_timeout` variable an
 | Student code or `leading_code.py` imports a module from `tests/`      | `helper_modules=["module_name"]`. See [Helper Modules](quick_start.md#helper-modules).                                     |
 | Student code or `leading_code.py` reads a file from `tests/`          | `data_files=["file.txt"]`, and read it in tests with the `tests_dir` fixture. See [Data Files](quick_start.md#data-files). |
 | Student code imports `os`, `sys`, `subprocess`, `pathlib` or `shutil` | `import_blacklist=[...]` without that module. These are blocked by default.                                                |
-| Solutions use builtins that aren't defaults, such as `sum` or `super` | `builtin_whitelist=[...]`. See [Builtin Function Control](quick_start.md#builtin-function-control).                        |
+| Solutions use builtins that aren't defaults, such as `getattr`        | `builtin_whitelist=[...]`. See [Builtin Function Control](quick_start.md#builtin-function-control).                        |
 | The legacy setup code blocked imports or builtins                     | `import_whitelist`, `import_blacklist` or `builtin_whitelist`                                                              |
 | A multi-file workspace project with `.py` files                       | `workspace_mode=True`. See [Workspace Grading](quick_start.md#workspace-grading).                                          |
 
@@ -345,10 +345,11 @@ These differences from the legacy grader are easy to miss:
 - **Setup code runs for each test**, and so does the student's code. Output that student code prints
   at the top level appears in each test's feedback, unless the test sets
   `include_stdout_feedback=False` in `grading_data`.
-- **Restricted builtins.** Student code and setup code get only a default set of builtins, which
-  leaves out common ones such as `sum`, `any`, `all`, `type`, `getattr`, `next` and `super`. Check
-  the solution and the starter code, and add what they use to `builtin_whitelist`. A missing builtin
-  shows up as a `NameError` when you test the conversion.
+- **Restricted builtins.** Student code and setup code get only a default set of builtins. It
+  includes common ones such as `sum`, `any` and `super`, but not `getattr`, `hasattr`, `setattr`,
+  `vars`, `dir`, `globals`, `open`, `eval` or `exec`. Check the solution and the starter code, and
+  add what they use to `builtin_whitelist`. A missing builtin shows up as a `NameError` when you
+  test the conversion.
 - **Default import blacklist.** `os`, `sys`, `subprocess`, `pathlib` and `shutil` are blocked unless
   you set `import_blacklist`.
 - **Syntax errors** make the submission ungradable instead of scoring 0.

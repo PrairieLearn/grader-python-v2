@@ -105,7 +105,7 @@ from pytest_prairielearn_grader import ConfigObject
 autograder_config = ConfigObject(
     sandbox_timeout=2.0,
     import_whitelist=["numpy", "math"],
-    builtin_whitelist=["len", "range", "sum"],
+    builtin_whitelist=["getattr"],
     output_level="friendly",
     syntax_errors_ungradable=True,
     starting_vars={"coefficient": 10},

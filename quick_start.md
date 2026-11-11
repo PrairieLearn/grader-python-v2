@@ -114,7 +114,7 @@ from pytest_prairielearn_grader import ConfigObject
 from pytest_prairielearn_grader.assertions import assert_fn_approx_equal
 from pytest_prairielearn_grader.fixture import StudentFixture
 
-autograder_config = ConfigObject(output_level="friendly", builtin_whitelist=["sum"])
+autograder_config = ConfigObject(output_level="friendly")
 
 
 @pytest.mark.grading_data(name="Average of one number", points=1)
@@ -135,8 +135,6 @@ def test_several(sandbox: StudentFixture, values: list[float]) -> None:
   value. See [Checking Answers](#checking-answers) for the other helpers and for checks that hide the
   expected value.
 - The `friendly` output level shows students only the assertion's message, without a traceback.
-- Student code gets a restricted set of builtins that doesn't include `sum`, so this question
-  allows it with `builtin_whitelist`. See [Builtin Function Control](#builtin-function-control).
 - Expected values are computed in the test. Don't put a reference solution in a file that student
   code can read.
 
@@ -776,7 +774,7 @@ import pytest
 autograder_config = ConfigObject(
     sandbox_timeout=2.0,
     import_whitelist=["numpy", "pandas"],
-    builtin_whitelist=["len", "range", "sum", "print"],
+    builtin_whitelist=["getattr", "hasattr"],
     starting_vars={"coefficient": 10, "threshold": 5.0},
     names_for_user=["coefficient", "threshold"],
 )
@@ -832,7 +830,7 @@ import helper_function as hf
 - **Import restrictions:** a listed module doesn't need to be in `import_whitelist`. Listing one that
   `import_blacklist` also blocks is a configuration error.
 - **Inside a helper module:** it runs with the same builtins and import rules as student code. For
-  example, it can't use `sum` or import `numpy` unless those are allowed.
+  example, it can't use `getattr` or import `numpy` unless those are allowed.
 - **Configuration errors:** if a listed file is missing or has a syntax error, or the module is
   blacklisted, the submission is ungradable. The students don't lose an attempt, and each test's
   message says what's wrong.
@@ -928,8 +926,8 @@ autograder_config = ConfigObject(
     # Security: only allow scientific computing libraries
     import_whitelist=["numpy", "scipy", "matplotlib"],
 
-    # Allow specific builtins for data processing
-    builtin_whitelist=["len", "range", "sum", "min", "max", "sorted"],
+    # Allow builtins that the defaults leave out
+    builtin_whitelist=["getattr", "hasattr"],
 
     # Provide test data
     starting_vars={
@@ -1167,18 +1165,21 @@ function: don't override it in setup code.
 
 Setup code, student code and helper modules get only these builtins by default:
 
-- Types: `bool`, `bytes`, `complex`, `dict`, `float`, `int`, `list`, `set`, `slice`, `str`, `tuple`
+- Types: `bool`, `bytearray`, `bytes`, `complex`, `dict`, `float`, `frozenset`, `int`, `list`,
+  `object`, `set`, `slice`, `str`, `tuple`, `type`
 - Type checking: `callable`, `isinstance`, `issubclass`
-- Iteration: `enumerate`, `map`, `range`, `sorted`, `zip`
-- Math: `abs`, `divmod`, `max`, `min`, `pow`, `round`
-- Conversion: `chr`, `hash`, `hex`, `id`, `oct`, `ord`, `repr`
-- Other: `len`, `print`, `None`, `True`, `False`, and class definitions
+- Iteration: `all`, `any`, `enumerate`, `filter`, `iter`, `map`, `next`, `range`, `reversed`,
+  `sorted`, `zip`
+- Math: `abs`, `divmod`, `max`, `min`, `pow`, `round`, `sum`
+- Conversion: `ascii`, `bin`, `chr`, `format`, `hash`, `hex`, `id`, `oct`, `ord`, `repr`
+- Classes: class definitions, `classmethod`, `property`, `staticmethod`, `super`
+- Other: `len`, `print`, `None`, `True`, `False`, `Ellipsis`, `NotImplemented`
 - The standard exception classes, such as `ValueError`
 
-Many common builtins aren't in this list, including `sum`, `any`, `all`, `type`, `getattr`,
-`hasattr`, `iter`, `next`, `reversed`, `filter`, `frozenset`, `format`, `object` and `super`. Student
-code that uses one fails with a `NameError`, so add the ones your question's solutions need to
-`builtin_whitelist`.
+Builtins that read or change attributes and namespaces by name, such as `getattr`, `hasattr`,
+`setattr`, `vars`, `dir` and `globals`, aren't in this list. Student code that uses one fails with a
+`NameError`, so add the ones your question's solutions need to `builtin_whitelist`. A builtin in
+the default list can't be removed with `builtin_whitelist`.
 
 **Dangerous builtins automatically blocked** include: `open`, `eval`, `exec`, `compile`, `__import__`, `input`, `exit`, `quit`, and others that could compromise security.
 
@@ -1187,14 +1188,14 @@ code that uses one fails with a `NameError`, so add the ones your question's sol
 ```python
 # In server.py
 def generate(data):
-    data["params"]["builtin_whitelist"] = ["sum", "any", "all"]
-    # Students can now use sum(), any() and all() in addition to the defaults
+    data["params"]["builtin_whitelist"] = ["getattr", "hasattr"]
+    # Students can now use getattr() and hasattr() in addition to the defaults
 ```
 
 **Example with builtin whitelist:**
 
 ```python
-# data.json has "builtin_whitelist": ["sum"]
+# data.json has "builtin_whitelist": ["getattr"]
 
 # Default builtins work normally:
 my_list = [1, 2, 3]  # ✓ list is a default
@@ -1202,10 +1203,10 @@ length = len(my_list)  # ✓ len is a default
 print(length)  # ✓ print is a default
 
 # Whitelisted builtins work:
-total = sum(my_list)  # ✓ sum is in the whitelist
+count = getattr(my_list, "count")(1)  # ✓ getattr is in the whitelist
 
 # Other builtins are blocked:
-found = any(my_list)  # ✗ NameError: name 'any' is not defined
+names = dir(my_list)  # ✗ NameError: name 'dir' is not defined
 
 # Dangerous builtins are blocked:
 f = open("file.txt")  # ✗ NameError: 'open' is not defined
@@ -1222,12 +1223,12 @@ def generate(data):
     # Allow only numpy and math imports
     data["params"]["import_whitelist"] = ["numpy", "math"]
 
-    # Allow sum for student convenience
-    data["params"]["builtin_whitelist"] = ["sum"]
+    # Allow getattr for student convenience
+    data["params"]["builtin_whitelist"] = ["getattr"]
 
     # Now students can:
     # - Import numpy and math
-    # - Use sum() plus the default builtins
+    # - Use getattr() plus the default builtins
     # - Cannot import other modules
     # - Cannot use dangerous builtins like open(), eval()
 ```
@@ -1246,7 +1247,7 @@ def generate(data):
 
     # Configure security restrictions
     data["params"]["import_whitelist"] = ["numpy", "numpy.linalg"]
-    data["params"]["builtin_whitelist"] = ["sum"]
+    data["params"]["builtin_whitelist"] = ["getattr"]
 
     # Define variables accessible to student code
     data["params"]["names_for_user"] = [
@@ -1283,7 +1284,7 @@ def test_security(sandbox: StudentFixture) -> None:
 {
   "params": {
     "import_whitelist": ["numpy", "math"],
-    "builtin_whitelist": ["sum"],
+    "builtin_whitelist": ["getattr"],
     "names_for_user": [...]
   }
 }
@@ -1294,10 +1295,9 @@ def test_security(sandbox: StudentFixture) -> None:
 **1. Force students to implement algorithms from scratch:**
 
 ```python
-# Require students to write their own sum
+# Require students to implement algorithms without libraries
 data["params"]["import_whitelist"] = []  # No imports allowed
-# Don't set builtin_whitelist: sum isn't a default builtin, so students can't call it.
-# sorted is a default, so this doesn't stop students from sorting with it.
+# Default builtins such as sorted() and sum() are still available.
 ```
 
 **2. Allow numerical computing but block system access:**
