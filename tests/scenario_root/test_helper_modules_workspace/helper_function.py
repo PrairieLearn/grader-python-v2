@@ -6,4 +6,4 @@ def triple(x):
 
 
 def total(values):
-    return sum(values)
+    return vars(values)
