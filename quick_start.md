@@ -1017,6 +1017,10 @@ Same as `assert_fn_equal` but uses approximate comparison:
 assert_fn_approx_equal(sandbox, "compute_area", args=(3.0,), expected=28.274, rtol=1e-2)
 ```
 
+**`assert_plot_equal(plot, expected, *, name="your plot", rtol=1e-5, atol=1e-8, ..., msg=None)`**
+
+Compares a student's matplotlib plot with a reference plot. See [Comparing with a Reference Plot](#comparing-with-a-reference-plot).
+
 #### Combining with Partial Credit
 
 Friendly mode works seamlessly with `FeedbackFixture`:
@@ -1108,6 +1112,66 @@ def test_student_plot(sandbox: StudentFixture) -> None:
     pt.assert_axis_label_contains(axis="y", strings_expected=["Value"])
     pt.assert_title_contains(["Data Visualization"])
 ```
+
+#### Comparing with a Reference Plot
+
+`assert_plot_equal` checks a student's plot against a reference plot that the test draws itself:
+
+```python
+import numpy as np
+import pytest
+from matplotlib.figure import Figure
+from pytest_prairielearn_grader.assertions import assert_plot_equal
+from pytest_prairielearn_grader.fixture import StudentFixture
+from pytest_prairielearn_grader.utils import GradingOutputLevel
+
+
+@pytest.mark.output(level=GradingOutputLevel.Friendly)
+@pytest.mark.grading_data(name="plot", points=1)
+def test_plot(sandbox: StudentFixture) -> None:
+    reference = Figure()
+    axes = reference.subplots()
+    x = np.arange(0, 11)
+    axes.semilogy(x, np.exp(x))
+
+    assert_plot_equal(sandbox.query("plot"), reference)
+```
+
+Draw the reference on a `Figure` made directly, as here, rather than with `plt`, so that it doesn't
+share pyplot's current figure with anything else in the test. Both plots can be a `Figure` or an
+`Axes`, and subplots are compared in order.
+
+By default, it checks:
+
+- **Subplots:** the number of axes.
+- **Scales:** the x and y axis scales, such as linear or log.
+- **Data:** the lines, scatter plots and bar plots, which must have the same number of each kind. Data is compared with `numpy.allclose`, using `rtol` and `atol`.
+
+The series can be in any order, and a line also matches when its points are in reverse order, since
+it looks the same. The points in a scatter plot and the bars in a bar plot can be in any order.
+
+Keyword arguments change what's checked:
+
+| Argument       | Default | Checks                                                                                                     |
+| -------------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `check_scales` | `True`  | The x and y axis scales.                                                                                   |
+| `check_data`   | `True`  | The data in lines, scatter plots and bar plots.                                                            |
+| `ordered`      | `False` | Requires lines, scatter plots, bar plots and legend labels to be in the reference's order.                 |
+| `allow_extra`  | `False` | Allows more lines, scatter plots or bar plots than the reference, such as a student's extra reference line. |
+| `check_labels` | `False` | The x and y axis labels, exactly.                                                                          |
+| `check_titles` | `False` | The title of each subplot and the figure, exactly.                                                         |
+| `check_legend` | `False` | The legend's labels and title, or that neither plot has a legend.                                          |
+| `check_limits` | `False` | The x and y axis limits, within `rtol` and `atol`.                                                         |
+| `check_styles` | `False` | Line colors, styles and markers, scatter point colors, and bar colors.                                     |
+
+A failure describes the first difference found, such as `Expected a log scale on the y-axis of your
+plot, but found a linear scale.` or `No line in your plot matches the line labeled 'exp'.` Lines
+are named by their labels when the reference has them. Use `name` to call the plot something else
+in messages, such as `name="plot"` for a variable, or `msg` to show your own message instead.
+
+Anything `assert_plot_equal` doesn't cover, such as checking that a label contains a word, can be
+checked directly on the `Figure`, or with `matplotcheck` as in the earlier example. Both can be
+used in the same test.
 
 #### Showing Plots to Students
 

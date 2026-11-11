@@ -5,6 +5,7 @@ import pytest
 from matplotcheck.base import PlotTester
 from matplotlib.figure import Figure
 
+from pytest_prairielearn_grader.assertions import assert_plot_equal
 from pytest_prairielearn_grader.assertions import assert_true
 from pytest_prairielearn_grader.fixture import FeedbackFixture
 from pytest_prairielearn_grader.fixture import StudentFixture
@@ -81,3 +82,32 @@ def test_rejected_plot_shows_clear_message(sandbox: StudentFixture) -> None:
 def test_add_image(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
     feedback.add_image(sandbox.query("plot"), label="Your plot")
     feedback.add_image(sandbox.query_function("make_axes"))
+
+
+def reference_plot() -> Figure:
+    figure = Figure()
+    axes = figure.subplots()
+    axes.semilogy(np.arange(0, 11), np.exp(np.arange(0, 11)), label="exp")
+    axes.set_xlabel("x")
+    axes.set_ylabel("f(x)")
+    axes.set_title("Growth")
+    axes.legend()
+    return figure
+
+
+@pytest.mark.grading_data(name="assert_plot_equal", points=1)
+def test_assert_plot_equal(sandbox: StudentFixture) -> None:
+    assert_plot_equal(
+        sandbox.query("plot"),
+        reference_plot(),
+        check_labels=True,
+        check_titles=True,
+        check_legend=True,
+        check_styles=True,
+    )
+
+
+@pytest.mark.output(level=GradingOutputLevel.Friendly)
+@pytest.mark.grading_data(name="assert_plot_equal_message", points=1)
+def test_assert_plot_equal_message(sandbox: StudentFixture) -> None:
+    assert_plot_equal(sandbox.query_function("make_axes"), reference_plot())
