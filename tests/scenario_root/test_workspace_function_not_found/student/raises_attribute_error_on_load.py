@@ -1,2 +1,2 @@
 missing = None
-missing.attribute  # noqa: B018
+missing.attribute

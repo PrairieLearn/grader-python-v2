@@ -238,7 +238,7 @@ class _HelperModules:
         # Add it before running it so that helper modules can import each other, as in sys.modules.
         self._loaded[name] = module
         try:
-            exec(compile(source, file_name, "exec"), module.__dict__)
+            exec(compile(source, file_name, "exec"), module.__dict__)  # noqa: S102
         except Exception as e:
             del self._loaded[name]
             raise ImportError(f"Helper module '{name}' could not be loaded: {type(e).__name__}: {e}") from e

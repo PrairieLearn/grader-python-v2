@@ -375,9 +375,7 @@ class ConfigObject:
         # Validate output_level
         valid_output_levels = ("none", "message", "traceback", "friendly")
         if self.output_level is not None and self.output_level not in valid_output_levels:
-            raise ValueError(
-                f"output_level must be one of {valid_output_levels} or None, got: {self.output_level!r}"
-            )
+            raise ValueError(f"output_level must be one of {valid_output_levels} or None, got: {self.output_level!r}")
 
     def to_dict(self) -> dict[str, Any]:
         """

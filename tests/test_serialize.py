@@ -1,12 +1,13 @@
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 from typing import cast
 
 import numpy as np
 import pandas as pd
 import pytest
+import tomllib
 
 from pytest_prairielearn_grader.json_utils import from_json
 from pytest_prairielearn_grader.json_utils import from_server_json
@@ -111,9 +112,6 @@ def test_from_server_json_networkx_graph() -> None:
 
 
 def test_optional_dependencies_are_declared() -> None:
-    import tomllib
-    from pathlib import Path
-
     project = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())["project"]
     requirements = project["dependencies"]
 
