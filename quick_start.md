@@ -1262,9 +1262,6 @@ function: don't override it in setup code.
 - **Not a security boundary:** the function can still be reached under another name, such as
   numpy's internal `numpy.linalg._linalg.inv`.
 
-> **Note:** blocking functions needs a grader release that includes
-> [PrairieLearn/grader-python-v2#39](https://github.com/PrairieLearn/grader-python-v2/pull/39).
-
 #### Builtin Function Control
 
 Setup code, student code and helper modules get only these builtins by default:
