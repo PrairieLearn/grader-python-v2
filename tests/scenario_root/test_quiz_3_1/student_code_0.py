@@ -20,6 +20,6 @@ def solve_ratings(members, sale_metadata):
     ratings = la.solve(theMatrix, sales)
     highest_performing = np.max(ratings)
     lowest_performing = np.min(ratings)
-    member_ratings = dict(zip(members, ratings))
+    member_ratings = dict(zip(members, ratings, strict=True))
 
     return member_ratings, highest_performing, lowest_performing

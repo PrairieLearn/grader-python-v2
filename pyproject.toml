@@ -32,7 +32,6 @@ dev = [
     "pandas-stubs",
     "matplotlib-stubs",
     "matplotlib",
-    "plot-serializer",
     "matplotcheck2>=0.2.1",
     "networkx",
     "types-networkx",
@@ -53,6 +52,14 @@ fallback-version = "0.0.0"
 line-length = 140
 src = ["src", "tests"]
 target-version = "py310"
+extend-exclude = [
+    # Notebook submissions, whose cells start with tags such as "#grade" that the formatter would change.
+    "tests/scenario_root/**/*.ipynb",
+    # These files test how the grader handles syntax errors, so they can't be parsed.
+    "tests/scenario_root/test_helper_modules_syntax_error/helper_function.py",
+    "tests/scenario_root/test_module_sandbox_init_error/student_code.py",
+    "tests/scenario_root/test_syntax_error_ungradable/student_code.py",
+]
 
 
 [tool.ruff.lint]
@@ -61,7 +68,6 @@ ignore = [
     "S101",   # flake8-bandit assert
     "S308",   # flake8-bandit suspicious-mark-safe-usage
     "E501",   # pycodestyle line-too-long
-    "PT004",
     "PT011",
     "PT013",
     "S603",
@@ -88,6 +94,13 @@ select = [
     "W",   # pycodestyle warnings
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# numpy and pandas aren't installed in the lite image, so they're imported only when needed.
+"src/pytest_prairielearn_grader/json_utils.py" = ["PLC0415"]
+# Stand-ins for student code: they use names that the sandbox injects, import inside functions to
+# test import restrictions, and evaluate expressions to test the sandbox.
+"tests/scenario_root/**" = ["F821", "PLC0415", "B018"]
+
 [tool.ruff.lint.flake8-pytest-style]
 fixture-parentheses = false
 mark-parentheses = false
@@ -111,5 +124,5 @@ exclude = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["sympy.*", "dill.*", "plot_serializer.*"]
+module = ["sympy.*", "dill.*"]
 ignore_missing_imports = true

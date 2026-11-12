@@ -8,6 +8,9 @@ from matplotlib.figure import Figure
 
 from pytest_prairielearn_grader.fixture import StudentFixture
 
+# In a fresh environment, the first sandbox's imports can take longer than the default timeout.
+sandbox_timeout = 30.0
+
 
 @pytest.mark.grading_data(name="line_plot_basic", points=2)
 def test_line_plot_basic(sandbox: StudentFixture) -> None:

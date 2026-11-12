@@ -209,6 +209,36 @@ def _find_blacklisted(name: str, fromlist: Sequence[str], import_blacklist: list
     return None
 
 
+def _block_blacklisted_functions(import_blacklist: list[str] | None) -> None:
+    """
+    Replaces each blacklisted function, such as "numpy.linalg.inv", with one that raises.
+
+    The importer only sees import statements, so on its own it can't stop `np.linalg.inv(A)`.
+    Modules are shared by everything in the sandbox, so this covers every way student code can
+    reach the function through its module. Entries whose module isn't installed, or that name a
+    module or a value that isn't callable, are left to the importer.
+    """
+    for entry in import_blacklist or []:
+        module_name, _, attribute = entry.rpartition(".")
+        if not module_name:
+            continue
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+        value = getattr(module, attribute, None)
+        if value is None or isinstance(value, types.ModuleType) or not callable(value):
+            continue
+        setattr(module, attribute, _make_blocked_function(entry))
+
+
+def _make_blocked_function(entry: str) -> Callable[..., Any]:
+    def blocked(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError(f"'{entry}' is blacklisted and cannot be used.")
+
+    return blocked
+
+
 class _HelperModules:
     """
     Loads the modules named by the helper_modules setting from the source sent by the grader.
@@ -238,7 +268,7 @@ class _HelperModules:
         # Add it before running it so that helper modules can import each other, as in sys.modules.
         self._loaded[name] = module
         try:
-            exec(compile(source, file_name, "exec"), module.__dict__)
+            exec(compile(source, file_name, "exec"), module.__dict__)  # noqa: S102
         except Exception as e:
             del self._loaded[name]
             raise ImportError(f"Helper module '{name}' could not be loaded: {type(e).__name__}: {e}") from e
@@ -407,6 +437,7 @@ async def student_code_runner(
         import_blacklist,
         helper_modules=None if helper_modules is None else _HelperModules(helper_modules, student_code_vars["__builtins__"]),
     )
+    _block_blacklisted_functions(import_blacklist)
 
     try:
         # First, execute the setup code if provided
@@ -537,6 +568,7 @@ async def workspace_runner(
         workspace_dir,
         helper_modules=None if helper_modules is None else _HelperModules(helper_modules, student_code_vars["__builtins__"]),
     )
+    _block_blacklisted_functions(import_blacklist)
     student_code_vars["__builtins__"]["__import__"] = workspace_importer
     # Patch the real builtins.__import__ so that workspace modules loaded via
     # importlib.import_module() (which use the real builtins, not student_code_vars)
@@ -814,4 +846,6 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Student code runs on a worker thread with no display, so matplotlib must not pick a GUI backend.
+    os.environ.setdefault("MPLBACKEND", "Agg")
     asyncio.run(main())

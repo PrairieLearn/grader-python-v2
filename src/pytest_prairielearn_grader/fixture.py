@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import os
@@ -63,7 +64,7 @@ def _extract_notebook_code(notebook_path: Path, cell_tag: str | None = None) -> 
         ImportError: If ``nbformat`` is not installed.
     """
     try:
-        import nbformat  # type: ignore[import-untyped]
+        import nbformat  # type: ignore[import-untyped]  # noqa: PLC0415
     except ImportError:
         raise ImportError(
             "nbformat is required for Jupyter notebook grading support. Install it with: pip install 'pytest-prairielearn-grader[notebook]'"
@@ -127,17 +128,39 @@ class FeedbackFixture:
 
     test_id: str
     messages: list[str]
+    images: list[dict[str, str]]
     score: float | None
     final_score_override: bool
 
     def __init__(self, test_id: str) -> None:
         self.test_id = test_id
         self.messages = []
+        self.images = []
         self.score = None
         self.final_score_override = False
 
     def add_message(self, message: str) -> None:
         self.messages.append(message)
+
+    def add_image(self, image: Any, *, label: str | None = None) -> None:
+        """
+        Shows an image with this test's results, such as a plot queried from student code.
+
+        `image` is a matplotlib Figure or Axes, or the bytes of a PNG file. PrairieLearn limits the
+        whole results file to 1 MB, so add only a few images.
+        """
+        if isinstance(image, bytes):
+            png = image
+        else:
+            # matplotlib is an optional dependency, so only import it when a plot is added.
+            from pytest_prairielearn_grader.matplotlib_json import plot_to_png  # noqa: PLC0415
+
+            png = plot_to_png(image)
+
+        entry = {"url": "data:image/png;base64," + base64.b64encode(png).decode("ascii")}
+        if label is not None:
+            entry["label"] = label
+        self.images.append(entry)
 
     def set_score(self, score: float) -> None:
         self.score = score
@@ -155,11 +178,14 @@ class FeedbackFixture:
         self.final_score_override = True
 
     def to_dict(self) -> dict:
-        return {
+        result: dict[str, Any] = {
             "test_id": self.test_id,
             "message": os.linesep.join(self.messages),
             "points_frac": self.score,
         }
+        if self.images:
+            result["images"] = self.images
+        return result
 
 
 class _SandboxBase:
@@ -272,7 +298,8 @@ class _SandboxBase:
 
     def _connect_to_server(self, timeout: float) -> None:
         """Read the host/port printed by the subprocess and connect the socket."""
-        assert self.process is not None and self.process.stdout is not None
+        assert self.process is not None
+        assert self.process.stdout is not None
         host, port = self.process.stdout.readline().decode().strip().split(",")
         self.student_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.student_socket.settimeout(timeout)

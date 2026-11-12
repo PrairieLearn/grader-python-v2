@@ -59,10 +59,10 @@ Set `gradingMethod` to `"External"` and pick a grader image:
 
 Two image variants are published. Pick the smallest one that includes what your question needs — a smaller image means faster cold-start pull times and a reduced security surface.
 
-| Tag       | Size (approx.) | Includes                                                                                                                                                                            | Best for                                                                                        |
-| --------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `:latest` | ~400–500 MB    | Full scientific stack: `numpy`, `pandas`, `scipy`, `matplotlib` + `matplotcheck2` + `plot-serializer`, `seaborn`, `scikit-learn`, `sympy`, `networkx`, `nltk`, `nbformat`, and more | Any course that needs scientific computing, data science, plotting, or Jupyter notebook grading |
-| `:lite`   | ~60–80 MB      | Grader core only: `pytest-prairielearn-grader`, `Pygments`, `beautifulsoup4`, `defusedxml`, `requests`                                                                              | Introductory CS courses where student code uses only the Python standard library                |
+| Tag       | Size (approx.) | Includes                                                                                                                                                        | Best for                                                                                        |
+| --------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `:latest` | ~400–500 MB    | Full scientific stack: `numpy`, `pandas`, `scipy`, `matplotlib` + `matplotcheck2`, `seaborn`, `scikit-learn`, `sympy`, `networkx`, `nltk`, `nbformat`, and more | Any course that needs scientific computing, data science, plotting, or Jupyter notebook grading |
+| `:lite`   | ~60–80 MB      | Grader core only: `pytest-prairielearn-grader`, `Pygments`, `beautifulsoup4`, `defusedxml`, `requests`                                                          | Introductory CS courses where student code uses only the Python standard library                |
 
 > **Note:** If a student's code imports a package that isn't present in the image (e.g., `numpy` in `:lite`), it will raise an `ImportError` and the test will fail with an exception. Make sure the image you choose contains everything both your test code and the expected student solution require.
 
@@ -386,7 +386,7 @@ comes from the same sandbox as the student's code, so a random value matches the
 code received.
 
 **Note**: Values sent back from the sandbox must be serializable. Supported types include: `int`, `float`, `str`, `list`, `dict`, `bool`, `None`, numpy arrays, pandas DataFrames,
-and plots built with `MatplotlibSerializer` (see [Testing Matplotlib Plots](#testing-matplotlib-plots)).
+and matplotlib plots (see [Testing Matplotlib Plots](#testing-matplotlib-plots)).
 
 ### Checking Answers
 
@@ -433,6 +433,10 @@ Same as `assert_fn_equal`, with a tolerance:
 ```python
 assert_fn_approx_equal(sandbox, "compute_area", args=(3.0,), expected=28.274, rtol=1e-2)
 ```
+
+**`assert_plot_equal(plot, expected, *, name="your plot", rtol=1e-5, atol=1e-8, ..., msg=None)`**
+
+Compares a student's matplotlib plot with a reference plot. See [Comparing with a Reference Plot](#comparing-with-a-reference-plot).
 
 **`assert_true(condition, *, msg=None)` / `assert_false(condition, *, msg=None)`**
 
@@ -534,6 +538,7 @@ def test_with_partial_credit(sandbox: StudentFixture, feedback: FeedbackFixture)
 - `feedback.set_score(fraction)`: Set partial credit (0.0 to 1.0)
 - `feedback.set_score_final(fraction)`: Set final score (prevents further updates)
 - `feedback.add_message(msg)`: Add custom feedback message
+- `feedback.add_image(image, label=None)`: Show an image with the test's results. See [Showing Plots to Students](#showing-plots-to-students)
 
 ### Capturing and Testing Output
 
@@ -602,24 +607,101 @@ in the module. Use regular `sandbox` for independent test execution.
 
 ### Testing Matplotlib Plots
 
-To grade a plot, student code builds it with `MatplotlibSerializer` from the `plot-serializer` package and returns the serializer. The test receives a matplotlib `Figure`.
-
-`plot-serializer` is included in the `:latest` image but not in `:lite`. Returning a plain matplotlib `Figure` from student code isn't supported.
+Student code can use matplotlib as usual and provide the plot's `Axes` or `Figure`. The test receives a matplotlib `Figure`.
 
 ```python
 # Student code
-from plot_serializer.matplotlib.serializer import MatplotlibSerializer
+import matplotlib.pyplot as plt
 
 
 def create_plot(data):
-    serializer = MatplotlibSerializer()
-    fig, ax = serializer.subplots()
-    ax.plot(data)
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Value")
-    ax.set_title("Data Visualization")
-    return serializer
+    plt.plot(data)
+    plt.xlabel("Time")
+    plt.ylabel("Value")
+    plt.title("Data Visualization")
+    return plt.gca()
 ```
+
+An `Axes` value brings its whole figure, so subplots are never lost: use `figure.axes` in your test to get each one, in the order the student created them.
+
+What's sent to the test:
+
+- **Lines**, with their data, label, color, width, style, marker and draw style. This includes `plot`, `semilogy`, `loglog` and `step`.
+- **Scatter points**, with their positions, sizes and colors.
+- **Bars and histograms**, with their positions, sizes, colors and orientation.
+- **Axes details:** scales, labels, titles, limits, position and legend labels. Twin axes come back as separate axes in `figure.axes`.
+- **Figure details:** size and overall title.
+
+Other plot content makes the query fail with a message saying what isn't supported, rather than losing data. This includes `errorbar`, `stem`, `fill_between`, `pie`, `imshow`, `contour`, `vlines` and `hlines`, `axhline` and `axvline`, `axvspan`, text and annotations, colormapped scatter plots, polar axes, inset axes and subfigures.
+
+Some details aren't sent, so don't grade them: grid lines, tick positions and labels, line and marker transparency set separately from color, scatter marker shapes, the base of a log scale, and `symlog` settings. Values are sent as decimal numbers, and dates come back as matplotlib date numbers (use `matplotlib.dates.num2date` to convert them). Categories on a line come back as strings.
+
+Importing matplotlib can take most of the default 1-second sandbox timeout, so set a longer one in plot questions, such as `sandbox_timeout = 15` at the top of the test file.
+
+`matplotlib` is included in the `:latest` image but not in `:lite`.
+
+#### Comparing with a Reference Plot
+
+`assert_plot_equal` checks a student's plot against a reference plot that the test draws itself:
+
+```python
+import numpy as np
+import pytest
+from matplotlib.figure import Figure
+from pytest_prairielearn_grader.assertions import assert_plot_equal
+from pytest_prairielearn_grader.fixture import StudentFixture
+from pytest_prairielearn_grader.utils import GradingOutputLevel
+
+
+@pytest.mark.output(level=GradingOutputLevel.Friendly)
+@pytest.mark.grading_data(name="plot", points=1)
+def test_plot(sandbox: StudentFixture) -> None:
+    reference = Figure()
+    axes = reference.subplots()
+    x = np.arange(0, 11)
+    axes.semilogy(x, np.exp(x))
+
+    assert_plot_equal(sandbox.query("plot"), reference)
+```
+
+Draw the reference on a `Figure` made directly, as here, rather than with `plt`, so that it doesn't
+share pyplot's current figure with anything else in the test. Both plots can be a `Figure` or an
+`Axes`, and subplots are compared in order.
+
+By default, it checks:
+
+- **Subplots:** the number of axes.
+- **Scales:** the x and y axis scales, such as linear or log.
+- **Data:** the lines, scatter plots and bar plots, which must have the same number of each kind. Data is compared with `numpy.allclose`, using `rtol` and `atol`.
+
+The series can be in any order, and a line also matches when its points are in reverse order, since
+it looks the same. The points in a scatter plot and the bars in a bar plot can be in any order.
+
+Keyword arguments change what's checked:
+
+| Argument       | Default | Checks                                                                                                      |
+| -------------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| `check_scales` | `True`  | The x and y axis scales.                                                                                    |
+| `check_data`   | `True`  | The data in lines, scatter plots and bar plots.                                                             |
+| `ordered`      | `False` | Requires lines, scatter plots, bar plots and legend labels to be in the reference's order.                  |
+| `allow_extra`  | `False` | Allows more lines, scatter plots or bar plots than the reference, such as a student's extra reference line. |
+| `check_labels` | `False` | The x and y axis labels, exactly.                                                                           |
+| `check_titles` | `False` | The title of each subplot and the figure, exactly.                                                          |
+| `check_legend` | `False` | The legend's labels and title, or that neither plot has a legend.                                           |
+| `check_limits` | `False` | The x and y axis limits, within `rtol` and `atol`.                                                          |
+| `check_styles` | `False` | Line colors, styles and markers, scatter point colors, and bar colors.                                      |
+
+A failure describes the first difference found, such as `Expected a log scale on the y-axis of your
+plot, but found a linear scale.` or `No line in your plot matches the line labeled 'exp'.` Lines
+are named by their labels when the reference has them. Use `name` to call the plot something else
+in messages, such as `name="plot"` for a variable, or `msg` to show your own message instead.
+
+#### Checking Plot Properties with matplotcheck
+
+For checks that `assert_plot_equal` doesn't cover, use the `Figure` directly or
+[matplotcheck](https://matplotcheck2.readthedocs.io/en/latest/), which is included in the `:latest`
+image. Its `PlotTester` can check that a label or title contains a word, histogram bins, the slope
+of a fitted line, and more. It can be used in the same test as `assert_plot_equal`:
 
 ```python
 # Test code
@@ -636,7 +718,7 @@ from pytest_prairielearn_grader.fixture import StudentFixture
 @pytest.mark.grading_data(name="Plot Test", points=5)
 def test_student_plot(sandbox: StudentFixture) -> None:
     """Test that student creates a correct plot."""
-    # Student function returns a MatplotlibSerializer, which arrives here as a Figure
+    # Student function returns an Axes or Figure, which arrives here as a Figure
     plot = sandbox.query_function("create_plot", data)
 
     assert_true(isinstance(plot, Figure))
@@ -653,9 +735,31 @@ def test_student_plot(sandbox: StudentFixture) -> None:
     pt.assert_title_contains(["Data Visualization"])
 ```
 
+#### Showing Plots to Students
+
+To show the student's plot with a test's results, pass it to `feedback.add_image`:
+
+```python
+@pytest.mark.grading_data(name="Plot Test", points=5)
+def test_student_plot(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
+    plot = sandbox.query_function("create_plot", data)
+    feedback.add_image(plot, label="Your plot")
+    ...
+```
+
+- **Values:** `add_image` takes a matplotlib `Figure` or `Axes`, or the bytes of a PNG file, and
+  adds it to the test's `images` in `results.json`. `<pl-external-grader-results>` shows it under
+  the test, whether the test passes or fails.
+- **Call it first:** a failed assertion ends the test, so add the image before checking the plot.
+- **A copy of the plot:** the image is drawn from the `Figure` that the test received, which the
+  grader rebuilt from the student's plot. It shows the data, scales, labels and other parts the
+  grader copies, but other styling can look different from what the student saw.
+- **Size:** PrairieLearn limits the whole `results.json` to 1 MB. A typical plot is tens of
+  kilobytes, but don't add an image in every case of a test with many parameters.
+
 The grader automatically serializes/deserializes:
 
-- Plots built with `MatplotlibSerializer` (received as a `Figure`)
+- Matplotlib `Axes` and `Figure` values (received as a `Figure`)
 - NumPy arrays
 - Pandas DataFrames
 - Standard Python types (int, float, str, list, dict, bool, None)

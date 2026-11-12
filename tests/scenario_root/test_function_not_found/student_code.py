@@ -23,4 +23,4 @@ def raises_import_error():
 
 
 def raises_name_error():
-    return undefined_variable  # noqa: F821
+    return undefined_variable

@@ -1,3 +1,4 @@
+import json
 import math
 import platform
 import shutil
@@ -9,7 +10,6 @@ import pytest
 
 pytest_plugins = ("pytester",)
 platform  # noqa: B018
-import json
 
 # --- Configuration ---
 # The root directory where your scenario folders are located
@@ -116,9 +116,7 @@ def test_autograder_scenario_with_pytester(pytester: pytest.Pytester, scenario_d
     # Check gradable field
     expected_gradable = expected_data_obj.get("gradable", True)
     actual_gradable = results_obj.get("gradable", True)
-    assert expected_gradable == actual_gradable, (
-        f"Gradable mismatch: expected {expected_gradable}, got {actual_gradable}"
-    )
+    assert expected_gradable == actual_gradable, f"Gradable mismatch: expected {expected_gradable}, got {actual_gradable}"
 
     # If submission is ungradable, check format_errors and message but skip score/test checks
     if not expected_gradable:
@@ -184,6 +182,12 @@ def test_autograder_scenario_with_pytester(pytester: pytest.Pytester, scenario_d
             assert normalized_expected in normalized_actual, (
                 f"Message mismatch for test '{test_id}'.\nassert {normalized_expected!r} in {normalized_actual!r}"
             )
+
+        # The expected images are their labels, since the PNG bytes depend on the matplotlib version.
+        if "images" in expected_test:
+            actual_images = actual_test.get("images", [])
+            assert [image.get("label") for image in actual_images] == expected_test["images"], f"Images mismatch for test '{test_id}'."
+            assert all(image["url"].startswith("data:image/png;base64,") for image in actual_images)
 
         assert actual_test["max_points"] == expected_test["max_points"], f"Max points mismatch for test '{test_id}'."
         assert math.isclose(expected_test["points_frac"], actual_test["points_frac"]), f"Points fraction mismatch for test '{test_id}'."

@@ -44,19 +44,13 @@ those submissions when they're regraded.
 Read every file in the question, including `info.json`, `question.html`, `server.py` and everything in
 `tests/`. Stop and report back instead of converting if the question needs one of these:
 
-- **Plot grading.** `PLTestCaseWithPlot` with tests that read `self.st.plt` or call
-  `Feedback.check_plot`. The pytest grader can only grade plots that student code builds with
-  `MatplotlibSerializer` and returns from a function (see
-  [Testing Matplotlib Plots](quick_start.md#testing-matplotlib-plots)), so the student's task would
-  change. `PLTestCaseWithPlot` on its own, with no test that reads the plot, isn't a blocker: use the
-  normal conversion.
 - **Course libraries.** `externalGradingOptions.serverFilesCourse` or imports of course-wide
   modules. The legacy grader put `/grade/serverFilesCourse` on the import path, and this grader
   doesn't.
 - **A custom grader image** or an `entrypoint` in `externalGradingOptions`.
 - **Values the sandbox can't send back.** Tests can only receive values that can be serialized:
-  numbers, strings, `None`, lists, dicts, numpy arrays and scalars, pandas DataFrames and plots
-  built with `MatplotlibSerializer`. A test that needs a student's class instance, generator or
+  numbers, strings, `None`, lists, dicts, numpy arrays and scalars, pandas DataFrames and matplotlib
+  plots. A test that needs a student's class instance, generator or
   open file has to be rewritten to call student functions that return plain values. Do that only
   if the student's task stays the same.
 
@@ -204,18 +198,39 @@ regrade of a variant, and `question.html` could show it with `{{params.x}}`.
 Replace the `Feedback.check_*` functions with the helpers in `pytest_prairielearn_grader.assertions`,
 or with numpy and pandas functions wrapped in `assert_true`:
 
-| Legacy                                      | pytest grader                                                                                                       |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `check_scalar(name, ref, st)`               | `assert_approx_equal(value, expected, description=name)`, keeping `rtol=1e-5, atol=1e-8` unless the test set others |
-| Exact comparisons                           | `assert_equal(value, expected, description=name)`                                                                   |
-| `call_user` plus a comparison               | `assert_fn_equal(sandbox, "f", args=(...), expected=...)` or `assert_fn_approx_equal`                               |
-| `check_numpy_array_allclose(name, ref, st)` | The four [array checks](quick_start.md#hiding-expected-values) on type, dtype, shape and values                     |
-| `check_numpy_array_features(name, ref, st)` | The first three of those array checks                                                                               |
-| `check_list(name, ref, st, entry_type=T)`   | `assert_true(isinstance(value, list), ...)`, a length check and an `isinstance` check on each entry                 |
-| `check_tuple`, `check_dict`                 | `assert_equal`                                                                                                      |
-| `check_dataframe(name, ref, st)`            | `pandas.testing.assert_frame_equal(expected, df, check_like=True)`, as in the `pandas` example question             |
+| Legacy                                            | pytest grader                                                                                                                       |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `check_scalar(name, ref, st)`                     | `assert_approx_equal(value, expected, description=name)`, keeping `rtol=1e-5, atol=1e-8` unless the test set others                 |
+| Exact comparisons                                 | `assert_equal(value, expected, description=name)`                                                                                   |
+| `call_user` plus a comparison                     | `assert_fn_equal(sandbox, "f", args=(...), expected=...)` or `assert_fn_approx_equal`                                               |
+| `check_numpy_array_allclose(name, ref, st)`       | The four [array checks](quick_start.md#hiding-expected-values) on type, dtype, shape and values                                     |
+| `check_numpy_array_features(name, ref, st)`       | The first three of those array checks                                                                                               |
+| `check_list(name, ref, st, entry_type=T)`         | `assert_true(isinstance(value, list), ...)`, a length check and an `isinstance` check on each entry                                 |
+| `check_tuple`, `check_dict`                       | `assert_equal`                                                                                                                      |
+| `check_dataframe(name, ref, st)`                  | `pandas.testing.assert_frame_equal(expected, df, check_like=True)`, as in the `pandas` example question                             |
+| `check_plot(name, ref, st, check_axes_scale=...)` | `assert_plot_equal(plot, reference)` with a reference plot drawn in the test. It checks the scales by default. See [Plots](#plots). |
 
 Keep `check_scalar`'s default tolerances of `rtol=1e-5, atol=1e-8` unless the legacy test set others.
+
+### Plots
+
+`PLTestCaseWithPlot` gave tests the student's pyplot module as `self.plt`, showed its current
+figure with `display_plot`, and added an optional test that the plot has labels and a title. The
+pytest grader has no current figure: student code saves its plot in a variable or returns it from
+a function, and the test gets a matplotlib `Figure` from `sandbox.query` or `query_function`.
+
+- Replace `Feedback.check_plot` with `assert_plot_equal`, drawing the reference plot on a new
+  `Figure` in the test. See [Comparing with a Reference Plot](quick_start.md#comparing-with-a-reference-plot).
+- To keep showing the student's plot, call `feedback.add_image(plot, label="Your plot")` before
+  the checks. See [Showing Plots to Students](quick_start.md#showing-plots-to-students).
+- If the legacy test read `self.plt` and the student's task doesn't save the plot anywhere, the
+  task has to change to save it, such as `plot = plt.gca()`. Report that back.
+- To keep the optional label test, check the labels with `matplotcheck` or on the `Figure` in a
+  test with its own points.
+- Set `sandbox_timeout = 15`, because importing matplotlib can take most of the 1 second default.
+- Use the `:latest` image, which includes matplotlib.
+
+The `plots` example question is a converted plot question.
 
 ### Feedback messages
 

@@ -14,4 +14,4 @@ def raises_import_error():
 
 
 def imports_missing_module():
-    import no_such_module_inside_function  # noqa: F401, PLC0415
+    import no_such_module_inside_function  # noqa: F401

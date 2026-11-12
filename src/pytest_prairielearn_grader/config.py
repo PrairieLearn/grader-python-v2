@@ -75,10 +75,13 @@ class ConfigObject:
 
     Modules in the blacklist are always blocked, even if in the whitelist, and so are their
     submodules: "os" also blocks `import os.path`.
+    An entry can also name a function in a module, such as "numpy.linalg.inv". The function then
+    raises a RuntimeError when it's called, however student code reached it, and importing it by
+    name is blocked. Setup code and helper modules can't call it either.
     Can be combined with import_whitelist for fine-grained control.
     Default blocks dangerous system operations: ["os", "sys", "subprocess", "pathlib", "shutil"].
 
-    Example: ["requests", "socket"]
+    Example: ["requests", "socket", "numpy.linalg.inv"]
     """
 
     helper_modules: list[str] | None = None
@@ -375,9 +378,7 @@ class ConfigObject:
         # Validate output_level
         valid_output_levels = ("none", "message", "traceback", "friendly")
         if self.output_level is not None and self.output_level not in valid_output_levels:
-            raise ValueError(
-                f"output_level must be one of {valid_output_levels} or None, got: {self.output_level!r}"
-            )
+            raise ValueError(f"output_level must be one of {valid_output_levels} or None, got: {self.output_level!r}")
 
     def to_dict(self) -> dict[str, Any]:
         """
