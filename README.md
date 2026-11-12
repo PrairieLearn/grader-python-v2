@@ -18,6 +18,9 @@ pip install pytest-prairielearn-grader[notebook]
 
 See [quick_start.md](quick_start.md) for a full tutorial with PrairieLearn integration examples.
 
+To convert a question from the legacy Python grader (`prairielearn/grader-python`), follow
+[converting.md](converting.md). It's written so that you can hand it to an AI coding agent.
+
 ## Key Features
 
 ### Sandboxed Execution
@@ -103,7 +106,7 @@ from pytest_prairielearn_grader import ConfigObject
 autograder_config = ConfigObject(
     sandbox_timeout=2.0,
     import_whitelist=["numpy", "math"],
-    builtin_whitelist=["len", "range", "sum"],
+    builtin_whitelist=["getattr"],
     output_level="friendly",
     syntax_errors_ungradable=True,
     starting_vars={"coefficient": 10},
