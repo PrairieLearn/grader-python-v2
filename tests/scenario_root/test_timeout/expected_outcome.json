@@ -4,7 +4,7 @@
     "tests": [
       {
         "max_points": 2,
-        "message_old": "No response from initialization with timeout 0.05",
+        "message_old": "Student code initialization timed out",
         "name": "initialization_timeout",
         "points_frac": 0.0,
         "points": 0.0,
@@ -22,7 +22,7 @@
       },
       {
         "max_points": 2,
-        "message": "No response from initialization with timeout 0.08",
+        "message": "Student code initialization timed out",
         "name": "marker_overrides_module",
         "points_frac": 0.0,
         "points": 0.0,
