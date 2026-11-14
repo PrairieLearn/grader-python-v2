@@ -204,6 +204,7 @@ def assert_plot_equal(
     check_legend: bool = False,
     check_limits: bool = False,
     check_styles: bool = False,
+    check_texts: bool = False,
     msg: str | None = None,
 ) -> None:
     """Assert that a student's matplotlib plot matches a reference plot.
@@ -213,8 +214,8 @@ def assert_plot_equal(
     test itself.  Subplots are compared in order.
 
     By default this checks the number of subplots, the axis scales, and the
-    data in each line, scatter plot and bar plot, which must have the same
-    number of each kind.  Series can be in any order, and a line also matches
+    data in each line, ``axhline`` and ``axvline`` line, scatter plot and bar
+    plot, which must have the same number of each kind.  Series can be in any order, and a line also matches
     when its points are in reverse order.  Scatter points and bars can be in
     any order.  Numbers are compared with ``numpy.allclose``.
 
@@ -237,8 +238,8 @@ def assert_plot_equal(
         Require lines, scatter plots, bar plots and legend labels to be in
         the same order as in the reference.
     allow_extra:
-        Allow the student's plot to have more lines, scatter plots or bar
-        plots than the reference.
+        Allow the student's plot to have more lines, scatter plots, bar
+        plots, text or annotations than the reference.
     check_labels:
         Compare the x and y axis labels exactly.
     check_titles:
@@ -251,6 +252,10 @@ def assert_plot_equal(
     check_styles:
         Compare line colors, line styles and markers, scatter point colors,
         and bar colors and orientation.
+    check_texts:
+        Compare the strings of ``text`` and ``annotate`` labels, and the point
+        each annotation points at.  The position of plain text isn't compared.
+        Extra text is allowed with *allow_extra*.
     msg:
         Optional message to show instead of the description of the
         difference.
@@ -280,6 +285,7 @@ def assert_plot_equal(
         check_legend=check_legend,
         check_limits=check_limits,
         check_styles=check_styles,
+        check_texts=check_texts,
     )
     if mismatch is not None:
         raise AssertionError(msg or mismatch)

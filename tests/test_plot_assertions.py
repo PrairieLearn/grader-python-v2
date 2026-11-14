@@ -41,6 +41,10 @@ def full_plot(axes: Any) -> None:
     axes.set_ylabel("Output")
     axes.set_title("Results")
     axes.set_title("left", loc="left")
+    axes.axhline(50, color="gray", linestyle=":", label="threshold")
+    axes.axvline(5)
+    axes.text(2, 80, "note")
+    axes.annotate("peak", xy=(10, 100), xytext=(0, -20), textcoords="offset points", arrowprops={"arrowstyle": "->"})
     axes.set_xlim(-1, 12)
     axes.legend(title="Key")
 
@@ -64,10 +68,36 @@ def full_plot(axes: Any) -> None:
         pytest.param(lambda a: (semilogy(a), a.plot(X, X)), semilogy, {"allow_extra": True}, id="allow-extra"),
         pytest.param(lambda a: (a.semilogy(X, np.exp(X), "r:"), a.set_xlabel("other")), semilogy, {}, id="labels-and-styles-unchecked"),
         pytest.param(lambda a: a.plot(X, X), semilogy, {"check_scales": False, "check_data": False}, id="nothing-checked"),
+        pytest.param(lambda a: (semilogy(a), a.text(3, 10, "e^x")), semilogy, {}, id="extra-text-unchecked"),
+        pytest.param(
+            lambda a: (semilogy(a), a.text(1, 1, "note"), a.annotate("max", xy=(10, np.exp(10)), xytext=(1, 1))),
+            lambda a: (semilogy(a), a.text(5, 5, "note"), a.annotate("max", xy=(10, np.exp(10)))),
+            {"check_texts": True},
+            id="text-position-free",
+        ),
+        pytest.param(
+            lambda a: (semilogy(a), a.text(1, 1, "extra")),
+            semilogy,
+            {"check_texts": True, "allow_extra": True},
+            id="extra-text-allowed",
+        ),
+        pytest.param(
+            lambda a: (a.axvline(2), a.axhline(1, color="red"), semilogy(a)),
+            lambda a: (semilogy(a), a.axhline(1), a.axvline(2)),
+            {},
+            id="reference-lines",
+        ),
         pytest.param(
             full_plot,
             full_plot,
-            {"check_labels": True, "check_titles": True, "check_legend": True, "check_limits": True, "check_styles": True},
+            {
+                "check_labels": True,
+                "check_titles": True,
+                "check_legend": True,
+                "check_limits": True,
+                "check_styles": True,
+                "check_texts": True,
+            },
             id="everything",
         ),
     ],
@@ -95,6 +125,7 @@ def test_plot_sent_from_the_sandbox_matches() -> None:
         check_legend=True,
         check_limits=True,
         check_styles=True,
+        check_texts=True,
     )
 
 
@@ -207,6 +238,41 @@ def test_plot_sent_from_the_sandbox_matches() -> None:
             {"check_styles": True},
             "Expected the expected bar plot in your plot to have colors #1f77b4ff, but found #ff0000ff.",
             id="bar-color",
+        ),
+        pytest.param(
+            semilogy,
+            lambda a: (semilogy(a), a.axhline(100)),
+            {},
+            "Expected 1 horizontal line in your plot, but found 0.",
+            id="missing-axhline",
+        ),
+        pytest.param(
+            lambda a: (semilogy(a), a.axvline(4)),
+            lambda a: (semilogy(a), a.axvline(5)),
+            {},
+            "No vertical line in your plot matches the expected vertical line.",
+            id="wrong-axvline",
+        ),
+        pytest.param(
+            lambda a: (semilogy(a), a.text(1, 1, "growth")),
+            lambda a: (semilogy(a), a.text(1, 1, "Growth")),
+            {"check_texts": True},
+            "Expected the text 'Growth' in your plot, but didn't find it.",
+            id="text-string",
+        ),
+        pytest.param(
+            lambda a: (semilogy(a), a.text(1, 1, "a"), a.text(1, 1, "b")),
+            lambda a: (semilogy(a), a.text(1, 1, "a")),
+            {"check_texts": True},
+            "Expected 1 text in your plot, but found 2.",
+            id="text-count",
+        ),
+        pytest.param(
+            lambda a: (semilogy(a), a.annotate("max", xy=(9, np.exp(9)))),
+            lambda a: (semilogy(a), a.annotate("max", xy=(10, np.exp(10)))),
+            {"check_texts": True},
+            "Expected the annotation 'max' in your plot to point at (10, 22026.5), but it points at (9, 8103.08).",
+            id="annotation-point",
         ),
         pytest.param(
             lambda a: a.plot(X, X),
