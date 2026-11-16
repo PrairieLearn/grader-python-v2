@@ -627,14 +627,17 @@ An `Axes` value brings its whole figure, so subplots are never lost: use `figure
 What's sent to the test:
 
 - **Lines**, with their data, label, color, width, style, marker and draw style. This includes `plot`, `semilogy`, `loglog` and `step`.
+- **Horizontal and vertical lines** from `axhline` and `axvline`, with their position, extent, label, color, width and style.
+- **Text** from `text`, in data or axes coordinates, with its position, alignment and rotation.
+- **Annotations** from `annotate`, with the annotated point in data or axes coordinates, the text position in data or axes coordinates or offset points, and whether it has an arrow.
 - **Scatter points**, with their positions, sizes and colors.
 - **Bars and histograms**, with their positions, sizes, colors and orientation.
 - **Axes details:** scales, labels, titles, limits, position and legend labels. Twin axes come back as separate axes in `figure.axes`.
 - **Figure details:** size and overall title.
 
-Other plot content makes the query fail with a message saying what isn't supported, rather than losing data. This includes `errorbar`, `stem`, `fill_between`, `pie`, `imshow`, `contour`, `vlines` and `hlines`, `axhline` and `axvline`, `axvspan`, text and annotations, colormapped scatter plots, polar axes, inset axes and subfigures.
+Other plot content makes the query fail with a message saying what isn't supported, rather than losing data. This includes `errorbar`, `stem`, `fill_between`, `pie`, `imshow`, `contour`, `vlines` and `hlines`, `axline`, `axvspan`, text in figure coordinates, colormapped scatter plots, polar axes, inset axes and subfigures.
 
-Some details aren't sent, so don't grade them: grid lines, tick positions and labels, line and marker transparency set separately from color, scatter marker shapes, the base of a log scale, and `symlog` settings. Values are sent as decimal numbers, and dates come back as matplotlib date numbers (use `matplotlib.dates.num2date` to convert them). Categories on a line come back as strings.
+Some details aren't sent, so don't grade them: grid lines, tick positions and labels, line and marker transparency set separately from color, scatter marker shapes, the base of a log scale, `symlog` settings, text fonts and colors, and arrow styles, since every annotation arrow comes back as a plain arrow. Values are sent as decimal numbers, and dates come back as matplotlib date numbers (use `matplotlib.dates.num2date` to convert them). Categories on a line come back as strings.
 
 Importing matplotlib can take most of the default 1-second sandbox timeout, so set a longer one in plot questions, such as `sandbox_timeout = 15` at the top of the test file.
 
@@ -672,24 +675,25 @@ By default, it checks:
 
 - **Subplots:** the number of axes.
 - **Scales:** the x and y axis scales, such as linear or log.
-- **Data:** the lines, scatter plots and bar plots, which must have the same number of each kind. Data is compared with `numpy.allclose`, using `rtol` and `atol`.
+- **Data:** the lines, `axhline` and `axvline` lines, scatter plots and bar plots, which must have the same number of each kind. Data is compared with `numpy.allclose`, using `rtol` and `atol`.
 
 The series can be in any order, and a line also matches when its points are in reverse order, since
 it looks the same. The points in a scatter plot and the bars in a bar plot can be in any order.
 
 Keyword arguments change what's checked:
 
-| Argument       | Default | Checks                                                                                                      |
-| -------------- | ------- | ----------------------------------------------------------------------------------------------------------- |
-| `check_scales` | `True`  | The x and y axis scales.                                                                                    |
-| `check_data`   | `True`  | The data in lines, scatter plots and bar plots.                                                             |
-| `ordered`      | `False` | Requires lines, scatter plots, bar plots and legend labels to be in the reference's order.                  |
-| `allow_extra`  | `False` | Allows more lines, scatter plots or bar plots than the reference, such as a student's extra reference line. |
-| `check_labels` | `False` | The x and y axis labels, exactly.                                                                           |
-| `check_titles` | `False` | The title of each subplot and the figure, exactly.                                                          |
-| `check_legend` | `False` | The legend's labels and title, or that neither plot has a legend.                                           |
-| `check_limits` | `False` | The x and y axis limits, within `rtol` and `atol`.                                                          |
-| `check_styles` | `False` | Line colors, styles and markers, scatter point colors, and bar colors.                                      |
+| Argument       | Default | Checks                                                                                                                           |
+| -------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `check_scales` | `True`  | The x and y axis scales.                                                                                                         |
+| `check_data`   | `True`  | The data in lines, `axhline` and `axvline` lines, scatter plots and bar plots.                                                   |
+| `ordered`      | `False` | Requires lines, scatter plots, bar plots and legend labels to be in the reference's order.                                       |
+| `allow_extra`  | `False` | Allows more lines, scatter plots, bar plots, text or annotations than the reference, such as a student's extra reference line.   |
+| `check_labels` | `False` | The x and y axis labels, exactly.                                                                                                |
+| `check_titles` | `False` | The title of each subplot and the figure, exactly.                                                                               |
+| `check_legend` | `False` | The legend's labels and title, or that neither plot has a legend.                                                                |
+| `check_limits` | `False` | The x and y axis limits, within `rtol` and `atol`.                                                                               |
+| `check_styles` | `False` | Line colors, styles and markers, scatter point colors, and bar colors.                                                           |
+| `check_texts`  | `False` | The strings of `text` and `annotate` labels, and the point each annotation points at. The position of plain text isn't compared. |
 
 A failure describes the first difference found, such as `Expected a log scale on the y-axis of your
 plot, but found a linear scale.` or `No line in your plot matches the line labeled 'exp'.` Lines

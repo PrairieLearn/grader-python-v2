@@ -36,6 +36,9 @@ DataFixture = dict[str, Any]
 
 SCRIPT_PATH = str(files("pytest_prairielearn_grader").joinpath("_student_code_runner.py"))
 DEFAULT_TIMEOUT = 1.0
+# Extra time to wait for the start response, so that the sandbox's own
+# initialization timeout is reported instead of racing against the socket timeout.
+START_RESPONSE_GRACE = 0.5
 
 # Modes for the data files folder (see _make_data_files_dir). Everyone can read the files and list the
 # folders, and nobody can change them; only the owner (root, in the Docker image) can make them writable again.
@@ -305,8 +308,10 @@ class _SandboxBase:
         self.student_socket.settimeout(timeout)
         self.student_socket.connect((host, int(port)))
 
-    def _read_start_response(self) -> ProcessStartResponse:
+    def _read_start_response(self, initialization_timeout: float) -> ProcessStartResponse:
         """Read and return the ProcessStartResponse sent after the start message."""
+        assert self.student_socket is not None
+        self.student_socket.settimeout(initialization_timeout + START_RESPONSE_GRACE)
         try:
             data = self._read_from_socket().decode()
             res: ProcessStartResponse = json.loads(data)
@@ -488,7 +493,7 @@ class StudentFixture(_SandboxBase):
             helper_modules=self.helper_modules,
         )
         self._send_json_object(json_message)
-        return self._read_start_response()
+        return self._read_start_response(initialization_timeout)
 
     def query_setup_raw(self, var_to_query: str) -> SetupQueryResponse:
         self._assert_process_running()
@@ -581,7 +586,7 @@ class WorkspaceFixture(_SandboxBase):
             helper_modules=self.helper_modules,
         )
         self._send_json_object(json_message)
-        return self._read_start_response()
+        return self._read_start_response(initialization_timeout)
 
     def __repr__(self) -> str:
         return f"WorkspaceFixture(workspace_dir={self.workspace_dir})"

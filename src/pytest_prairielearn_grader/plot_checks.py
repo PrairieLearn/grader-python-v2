@@ -16,6 +16,10 @@ from matplotlib.colors import to_hex
 from matplotlib.container import BarContainer
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
+from matplotlib.text import Annotation
+from matplotlib.text import Text
+
+from .matplotlib_json import reference_line_orientation
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +51,7 @@ class Options:
     check_legend: bool
     check_limits: bool
     check_styles: bool
+    check_texts: bool
 
 
 class Mismatch(Exception):
@@ -106,8 +111,17 @@ def _compare_axes(actual: Any, reference: Any, where: str, opts: Options) -> Non
                 raise Mismatch(f"Expected a {expected_scale} scale on the {axis}-axis of {where}, but found a {actual_scale} scale.")
 
     if opts.check_data or opts.check_styles:
-        for kind, extract in (("line", _lines), ("scatter plot", _scatters), ("bar plot", _bars)):
+        for kind, extract in (
+            ("line", _lines),
+            ("horizontal line", _horizontal_lines),
+            ("vertical line", _vertical_lines),
+            ("scatter plot", _scatters),
+            ("bar plot", _bars),
+        ):
             _compare_series(extract(actual), extract(reference), kind, where, opts)
+
+    if opts.check_texts:
+        _compare_texts(_texts(actual), _texts(reference), where, opts)
 
     if opts.check_limits:
         for axis in ("x", "y"):
@@ -185,8 +199,102 @@ def _lines(axes: Any) -> list[Series]:
             },
         )
         for line in axes.lines
-        if type(line) is Line2D
+        if type(line) is Line2D and line.get_transform() is axes.transData
     ]
+
+
+def _reference_lines(axes: Any, orientation: str) -> list[Series]:
+    series = []
+    for line in axes.lines:
+        if type(line) is not Line2D or reference_line_orientation(axes, line) != orientation:
+            continue
+        # The value is in data coordinates, and the extent along the line is a fraction of the axes.
+        if orientation == "horizontal":
+            value, extent = line.get_ydata(orig=False), line.get_xdata()
+        else:
+            value, extent = line.get_xdata(orig=False), line.get_ydata()
+        series.append(
+            Series(
+                kind=f"{orientation} line",
+                label=str(line.get_label()),
+                data=[_floats(value)[:1], _floats(extent)],
+                reversible=False,
+                styles={"color": _hex(line.get_color()), "line style": line.get_linestyle()},
+            )
+        )
+    return series
+
+
+def _horizontal_lines(axes: Any) -> list[Series]:
+    return _reference_lines(axes, "horizontal")
+
+
+def _vertical_lines(axes: Any) -> list[Series]:
+    return _reference_lines(axes, "vertical")
+
+
+@dataclass(frozen=True, slots=True)
+class PlotText:
+    kind: str
+    text: str
+    # The annotated point for an annotation. Plain text is matched by its string alone.
+    point: np.ndarray | None
+    coordinates: str
+
+
+def _texts(axes: Any) -> list[PlotText]:
+    texts = []
+    for text in axes.texts:
+        if type(text) is Annotation:
+            # Typed as Any because the matplotlib stubs don't include an annotation's xy.
+            annotation: Any = text
+            coordinates = "data" if annotation.xycoords == "data" else "axes"
+            point = annotation.xy
+            if coordinates == "data":
+                point = (axes.xaxis.convert_units(point[0]), axes.yaxis.convert_units(point[1]))
+            texts.append(PlotText("annotation", text.get_text(), _floats(point), coordinates))
+        elif type(text) is Text:
+            texts.append(PlotText("text", text.get_text(), None, "data"))
+    return texts
+
+
+def _format_point(point: np.ndarray, coordinates: str) -> str:
+    position = f"({point[0]:g}, {point[1]:g})"
+    return position if coordinates == "data" else f"{position} in axes coordinates"
+
+
+def _compare_texts(actual: list[PlotText], expected: list[PlotText], where: str, opts: Options) -> None:
+    for kind in ("text", "annotation"):
+        actual_count = sum(text.kind == kind for text in actual)
+        expected_count = sum(text.kind == kind for text in expected)
+        if opts.allow_extra:
+            if actual_count < expected_count:
+                raise Mismatch(f"Expected at least {_plural(expected_count, kind)} in {where}, but found {actual_count}.")
+        elif actual_count != expected_count:
+            raise Mismatch(f"Expected {_plural(expected_count, kind)} in {where}, but found {actual_count}.")
+
+    def matches(candidate: PlotText, reference: PlotText) -> bool:
+        if candidate.kind != reference.kind or candidate.text != reference.text:
+            return False
+        if reference.point is None or candidate.point is None:
+            return True
+        return candidate.coordinates == reference.coordinates and np.allclose(
+            candidate.point, reference.point, rtol=opts.rtol, atol=opts.atol
+        )
+
+    remaining = list(actual)
+    for reference in expected:
+        position = next((i for i, candidate in enumerate(remaining) if matches(candidate, reference)), None)
+        if position is not None:
+            remaining.pop(position)
+            continue
+        same_text = next((text for text in remaining if text.kind == reference.kind and text.text == reference.text), None)
+        if reference.point is not None and same_text is not None and same_text.point is not None:
+            raise Mismatch(
+                f"Expected the annotation {reference.text!r} in {where} to point at {_format_point(reference.point, reference.coordinates)}, "
+                f"but it points at {_format_point(same_text.point, same_text.coordinates)}."
+            )
+        raise Mismatch(f"Expected the {reference.kind} {reference.text!r} in {where}, but didn't find it.")
 
 
 def _sorted_points(columns: list[np.ndarray], colors: list[str]) -> tuple[list[np.ndarray], list[str]]:

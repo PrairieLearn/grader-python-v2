@@ -22,6 +22,8 @@ from matplotlib.container import StemContainer
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
+from matplotlib.text import Annotation
+from matplotlib.text import Text
 
 MATPLOTLIB_FIGURE_TYPE = "matplotlib_figure"
 
@@ -30,6 +32,13 @@ _LINESTYLES = frozenset({"-", "--", "-.", ":", "None", " ", ""})
 _DRAWSTYLES = frozenset({"default", "steps", "steps-pre", "steps-mid", "steps-post"})
 _ORIENTATIONS = frozenset({"vertical", "horizontal"})
 _AXIS_UNITS = frozenset({"number", "date", "category"})
+_TEXT_COORDINATES = frozenset({"data", "axes"})
+_ANNOTATION_TEXT_COORDINATES = frozenset({"data", "axes", "offset points"})
+_ORIENTATIONS_FOR_LINES = frozenset({"horizontal", "vertical"})
+# matplotlib names for the coordinate systems that annotations can use.
+_ANNOTATION_COORDINATE_NAMES = {"data": "data", "axes fraction": "axes", "offset points": "offset points"}
+_HORIZONTAL_ALIGNMENTS = frozenset({"left", "center", "right"})
+_VERTICAL_ALIGNMENTS = frozenset({"top", "bottom", "center", "baseline", "center_baseline"})
 _MAX_FIGURE_SIZE_INCHES = 1000.0
 
 
@@ -86,8 +95,13 @@ def _check_axes(axes: Any) -> None:
         raise UnsupportedPlotError("inset axes aren't supported")
     if axes.images:
         raise UnsupportedPlotError("images aren't supported")
-    if axes.texts:
-        raise UnsupportedPlotError("text and annotations aren't supported")
+    for text in axes.texts:
+        if type(text) is Annotation:
+            _annotation_coordinates(text)
+        elif type(text) is Text:
+            _text_coordinates(axes, text)
+        else:
+            raise UnsupportedPlotError(f"{type(text).__name__} text isn't supported")
     if axes.tables:
         raise UnsupportedPlotError("tables aren't supported")
     if axes.artists:
@@ -123,8 +137,8 @@ def _check_axes(axes: Any) -> None:
     for line in axes.lines:
         if type(line) is not Line2D:
             raise UnsupportedPlotError(f"{type(line).__name__} lines aren't supported")
-        if line.get_transform() is not axes.transData:
-            raise UnsupportedPlotError("lines that don't use data coordinates, such as axhline and axvline, aren't supported")
+        if line.get_transform() is not axes.transData and reference_line_orientation(axes, line) is None:
+            raise UnsupportedPlotError("lines that don't use data coordinates, other than axhline and axvline, aren't supported")
         if not isinstance(line.get_marker(), str | None):
             raise UnsupportedPlotError("custom line markers aren't supported")
 
@@ -150,6 +164,43 @@ def _axis_to_json(axis: Any) -> dict[str, Any]:
     return {"scale": scale, "label": axis.get_label_text(), "units": units, "categories": categories}
 
 
+def _text_coordinates(axes: Any, text: Any) -> str:
+    # Compare by identity, as for scatter offsets.
+    transform = text.get_transform()
+    if transform is axes.transData:
+        return "data"
+    if transform is axes.transAxes:
+        return "axes"
+    raise UnsupportedPlotError("text that doesn't use data or axes coordinates isn't supported")
+
+
+def _annotation_coordinates(annotation: Any) -> tuple[str, str]:
+    point = _ANNOTATION_COORDINATE_NAMES.get(annotation.xycoords) if isinstance(annotation.xycoords, str) else None
+    text = _ANNOTATION_COORDINATE_NAMES.get(annotation.anncoords) if isinstance(annotation.anncoords, str) else None
+    if point not in _TEXT_COORDINATES or text is None:
+        raise UnsupportedPlotError(
+            "annotations are supported only with xycoords 'data' or 'axes fraction' and textcoords 'data', 'axes fraction' or 'offset points'"
+        )
+    return point, text
+
+
+def reference_line_orientation(axes: Any, line: Any) -> str | None:
+    """Return "horizontal" or "vertical" for a line drawn by axhline or axvline, or None."""
+    # Compare by identity: these are the transforms that axhline and axvline use.
+    transform = line.get_transform()
+    if transform is axes.get_yaxis_transform(which="grid"):
+        values = np.asarray(line.get_ydata(orig=False), dtype=float)
+        orientation = "horizontal"
+    elif transform is axes.get_xaxis_transform(which="grid"):
+        values = np.asarray(line.get_xdata(orig=False), dtype=float)
+        orientation = "vertical"
+    else:
+        return None
+    if values.shape != (2,) or values[0] != values[1]:
+        return None
+    return orientation
+
+
 def _floats(values: Any) -> list[float]:
     return np.asarray(values, dtype=float).ravel().tolist()
 
@@ -164,6 +215,23 @@ def _line_to_json(line: Any) -> dict[str, Any]:
         "linestyle": line.get_linestyle(),
         "marker": line.get_marker(),
         "drawstyle": line.get_drawstyle(),
+    }
+
+
+def _reference_line_to_json(axes: Any, line: Any) -> dict[str, Any]:
+    orientation = reference_line_orientation(axes, line)
+    # The value is in data coordinates, and the extent along the line is a fraction of the axes.
+    value, extent = (
+        (line.get_ydata(orig=False), line.get_xdata()) if orientation == "horizontal" else (line.get_xdata(orig=False), line.get_ydata())
+    )
+    return {
+        "orientation": orientation,
+        "value": float(_floats(value)[0]),
+        "extent": _floats(extent),
+        "label": str(line.get_label()),
+        "color": to_hex(line.get_color(), keep_alpha=True),
+        "linewidth": float(line.get_linewidth()),
+        "linestyle": line.get_linestyle(),
     }
 
 
@@ -190,6 +258,38 @@ def _bars_to_json(container: Any) -> dict[str, Any]:
     }
 
 
+def _data_point(axes: Any, point: Any, coordinates: str) -> list[float]:
+    if coordinates != "data":
+        return _floats(point)
+    # Convert category and date positions to numbers.
+    return [float(axes.xaxis.convert_units(point[0])), float(axes.yaxis.convert_units(point[1]))]
+
+
+def _text_to_json(axes: Any, text: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "text": text.get_text(),
+        "horizontal_alignment": text.get_horizontalalignment(),
+        "vertical_alignment": text.get_verticalalignment(),
+        "rotation": float(text.get_rotation()),
+    }
+    if type(text) is Annotation:
+        # Typed as Any because the matplotlib stubs don't include an annotation's xy and arrow_patch.
+        annotation: Any = text
+        point_coordinates, text_coordinates = _annotation_coordinates(annotation)
+        result |= {
+            "kind": "annotation",
+            "point": _data_point(axes, annotation.xy, point_coordinates),
+            "coordinates": point_coordinates,
+            "text_position": _data_point(axes, annotation.xyann, text_coordinates),
+            "text_coordinates": text_coordinates,
+            "arrow": annotation.arrow_patch is not None,
+        }
+    else:
+        coordinates = _text_coordinates(axes, text)
+        result |= {"kind": "text", "point": _data_point(axes, text.get_position(), coordinates), "coordinates": coordinates}
+    return result
+
+
 def _axes_to_json(axes: Any) -> dict[str, Any]:
     _check_axes(axes)
     legend = axes.get_legend()
@@ -200,9 +300,11 @@ def _axes_to_json(axes: Any) -> dict[str, Any]:
         "title": {location: axes.get_title(loc=location) for location in ("left", "center", "right")},
         "x_limits": [float(value) for value in axes.get_xlim()],
         "y_limits": [float(value) for value in axes.get_ylim()],
-        "lines": [_line_to_json(line) for line in axes.lines],
+        "lines": [_line_to_json(line) for line in axes.lines if line.get_transform() is axes.transData],
+        "reference_lines": [_reference_line_to_json(axes, line) for line in axes.lines if line.get_transform() is not axes.transData],
         "scatters": [_scatter_to_json(collection) for collection in axes.collections],
         "bars": [_bars_to_json(container) for container in axes.containers],
+        "texts": [_text_to_json(axes, text) for text in axes.texts],
         "legend": None
         if legend is None
         else {"title": legend.get_title().get_text(), "labels": [text.get_text() for text in legend.get_texts()]},
@@ -331,6 +433,56 @@ def _add_line(axes: Any, data: Any, x_categories: list[str], y_categories: list[
     )
 
 
+_MATPLOTLIB_ANNOTATION_COORDINATES = {name: matplotlib_name for matplotlib_name, name in _ANNOTATION_COORDINATE_NAMES.items()}
+
+
+def _add_text(axes: Any, data: Any) -> None:
+    text = _as_dict(data, "text")
+    kind = _as_choice(text["kind"], frozenset({"text", "annotation"}), "text kind")
+    coordinates = _as_choice(text["coordinates"], _TEXT_COORDINATES, "text coordinates")
+    point = _as_finite_numbers(text["point"], 2, "text position")
+    options = {
+        "horizontalalignment": _as_choice(text["horizontal_alignment"], _HORIZONTAL_ALIGNMENTS, "text alignment"),
+        "verticalalignment": _as_choice(text["vertical_alignment"], _VERTICAL_ALIGNMENTS, "text alignment"),
+        "rotation": _as_finite_number(text["rotation"], "text rotation"),
+    }
+    content = _as_str(text["text"], "text")
+    if kind == "text":
+        axes.text(*point, content, transform=axes.transData if coordinates == "data" else axes.transAxes, **options)
+        return
+    text_coordinates = _as_choice(text["text_coordinates"], _ANNOTATION_TEXT_COORDINATES, "annotation text coordinates")
+    if type(text["arrow"]) is not bool:
+        raise ValueError("annotation arrow should be true or false")
+    axes.annotate(
+        content,
+        xy=point,
+        xycoords=_MATPLOTLIB_ANNOTATION_COORDINATES[coordinates],
+        xytext=_as_finite_numbers(text["text_position"], 2, "annotation text position"),
+        textcoords=_MATPLOTLIB_ANNOTATION_COORDINATES[text_coordinates],
+        arrowprops={"arrowstyle": "->"} if text["arrow"] else None,
+        **options,
+    )
+
+
+def _add_reference_line(axes: Any, data: Any) -> None:
+    line = _as_dict(data, "reference line")
+    start, end = _as_finite_numbers(line["extent"], 2, "reference line extent")
+    add = (
+        axes.axhline
+        if _as_choice(line["orientation"], _ORIENTATIONS_FOR_LINES, "reference line orientation") == "horizontal"
+        else axes.axvline
+    )
+    add(
+        _as_finite_number(line["value"], "reference line value"),
+        start,
+        end,
+        label=_as_str(line["label"], "reference line label"),
+        color=_as_str(line["color"], "reference line color"),
+        linewidth=_as_finite_number(line["linewidth"], "reference line width"),
+        linestyle=_as_choice(line["linestyle"], _LINESTYLES, "reference line style"),
+    )
+
+
 def _add_axes(figure: Any, data: Any) -> None:
     axes_data = _as_dict(data, "axes")
     axes = figure.add_axes(_as_finite_numbers(axes_data["position"], 4, "axes position"))
@@ -355,6 +507,10 @@ def _add_axes(figure: Any, data: Any) -> None:
     _apply_axis_units(axes.yaxis, y_axis, y_categories)
     for line in _as_list(axes_data["lines"], "lines"):
         _add_line(axes, line, x_categories, y_categories)
+    for line in _as_list(axes_data["reference_lines"], "reference lines"):
+        _add_reference_line(axes, line)
+    for text in _as_list(axes_data["texts"], "texts"):
+        _add_text(axes, text)
 
     axes.set_xlabel(x_axis["label"])
     axes.set_ylabel(y_axis["label"])

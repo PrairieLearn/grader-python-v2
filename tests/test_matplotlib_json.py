@@ -13,6 +13,8 @@ import pytest
 from matplotcheck.base import PlotTester
 from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
+from matplotlib.text import Annotation
+from matplotlib.text import Text
 
 from pytest_prairielearn_grader.json_utils import from_json
 from pytest_prairielearn_grader.json_utils import to_json
@@ -198,6 +200,60 @@ def test_legend_labels_kept() -> None:
     assert legend.get_title().get_text() == "Key"
 
 
+def test_text_and_annotations_kept() -> None:
+    _, axes = plt.subplots()
+    axes.plot([1, 2, 3], [1, 4, 9])
+    axes.text(1, 5, "data", horizontalalignment="center", rotation=45)
+    axes.text(0.5, 0.9, "axes", transform=axes.transAxes)
+    axes.annotate("max", xy=(3, 9), xytext=(0, -20), textcoords="offset points", arrowprops={"facecolor": "black"})
+    axes.annotate("corner", xy=(0.1, 0.1), xycoords="axes fraction")
+
+    rebuilt: Any = round_trip(axes).axes[0]
+
+    texts = rebuilt.texts
+    assert [(type(text), text.get_text()) for text in texts] == [
+        (Text, "data"),
+        (Text, "axes"),
+        (Annotation, "max"),
+        (Annotation, "corner"),
+    ]
+    assert texts[0].get_position() == (1, 5)
+    assert texts[0].get_transform() is rebuilt.transData
+    assert (texts[0].get_horizontalalignment(), texts[0].get_rotation()) == ("center", 45)
+    assert texts[1].get_transform() is rebuilt.transAxes
+    assert (texts[2].xy, texts[2].xyann, texts[2].anncoords) == ((3, 9), (0, -20), "offset points")
+    assert texts[2].arrow_patch is not None
+    assert (texts[3].xy, texts[3].xycoords, texts[3].arrow_patch) == ((0.1, 0.1), "axes fraction", None)
+
+
+def test_text_on_category_axis() -> None:
+    _, axes = plt.subplots()
+    axes.bar(["a", "b"], [1, 2])
+    # The matplotlib stubs don't allow category positions.
+    axes.text("b", 1.5, "tall")  # type: ignore[arg-type]
+
+    rebuilt: Any = round_trip(axes).axes[0]
+
+    assert rebuilt.texts[0].get_position() == (1, 1.5)
+
+
+def test_axhline_and_axvline_kept() -> None:
+    _, axes = plt.subplots()
+    axes.plot([1, 2], [3, 4])
+    axes.axhline(3.5, 0.1, 0.9, color="red", linestyle="--", label="threshold")
+    axes.axvline(1.5)
+
+    rebuilt: Any = round_trip(axes).axes[0]
+
+    data_line, horizontal, vertical = rebuilt.lines
+    assert data_line.get_transform() is rebuilt.transData
+    assert horizontal.get_transform() is rebuilt.get_yaxis_transform(which="grid")
+    assert (list(horizontal.get_xdata()), list(horizontal.get_ydata())) == ([0.1, 0.9], [3.5, 3.5])
+    assert (to_hex(horizontal.get_color()), horizontal.get_linestyle(), horizontal.get_label()) == (to_hex("red"), "--", "threshold")
+    assert vertical.get_transform() is rebuilt.get_xaxis_transform(which="grid")
+    assert list(vertical.get_xdata()) == [1.5, 1.5]
+
+
 def test_rebuilt_figure_can_be_drawn() -> None:
     _, axes = plt.subplots()
     axes.plot([1, 2], [3, 4], label="data")
@@ -249,18 +305,16 @@ def _image(axes: Any) -> None:
     axes.imshow([[1, 2], [3, 4]])
 
 
-def _text(axes: Any) -> None:
-    axes.plot([1, 2], [3, 4])
-    axes.text(1, 3, "note")
+def _figure_text(axes: Any) -> None:
+    axes.text(0.5, 0.5, "note", transform=axes.figure.transFigure)
 
 
-def _annotation(axes: Any) -> None:
-    axes.annotate("note", (1, 3))
+def _figure_annotation(axes: Any) -> None:
+    axes.annotate("note", (0.5, 0.5), xycoords="figure fraction")
 
 
-def _axhline(axes: Any) -> None:
-    axes.plot([1, 2], [3, 4])
-    axes.axhline(3)
+def _annotation_text_in_pixels(axes: Any) -> None:
+    axes.annotate("note", (1, 3), xytext=(5, 5), textcoords="offset pixels")
 
 
 def _axline(axes: Any) -> None:
@@ -326,9 +380,9 @@ def _function_scale(axes: Any) -> None:
         (_bar_with_errors, "errorbar"),
         (_stem, "stem"),
         (_image, "images"),
-        (_text, "text"),
-        (_annotation, "text"),
-        (_axhline, "axhline"),
+        (_figure_text, "data or axes coordinates"),
+        (_figure_annotation, "xycoords"),
+        (_annotation_text_in_pixels, "textcoords"),
         (_axline, "AxLine"),
         (_axes_coordinates, "data coordinates"),
         (_blended_coordinates, "data coordinates"),
@@ -395,6 +449,9 @@ def valid_data() -> dict[str, Any]:
     axes.plot([1, 2], [3, 4], label="line")
     axes.scatter([1], [2])
     axes.bar([1], [2])
+    axes.axhline(1)
+    axes.text(1, 2, "text")
+    axes.annotate("annotation", (1, 2), arrowprops={})
     axes.legend()
     return json.loads(json.dumps(to_json(axes)))["_value"]
 
@@ -455,6 +512,17 @@ LINE = ["axes", 0, "lines", 0]
         _set(["axes", 0, "scatters", 0, "x"], []),
         _set(["axes", 0, "legend", "labels"], "line"),
         _set(["axes", 0, "title"], "title"),
+        _delete(["axes", 0, "texts"]),
+        _set(["axes", 0, "texts", 0, "kind"], "arrow"),
+        _set(["axes", 0, "texts", 0, "coordinates"], "figure"),
+        _set(["axes", 0, "texts", 0, "point"], [1]),
+        _set(["axes", 0, "texts", 0, "text"], 5),
+        _set(["axes", 0, "texts", 0, "horizontal_alignment"], "middle"),
+        _set(["axes", 0, "texts", 1, "text_coordinates"], "offset pixels"),
+        _set(["axes", 0, "texts", 1, "arrow"], "yes"),
+        _set(["axes", 0, "reference_lines", 0, "orientation"], "diagonal"),
+        _set(["axes", 0, "reference_lines", 0, "extent"], [0]),
+        _set(["axes", 0, "reference_lines", 0, "value"], float("inf")),
     ],
 )
 def test_malformed_data_raises_value_error(change: Callable[[dict[str, Any]], None]) -> None:
