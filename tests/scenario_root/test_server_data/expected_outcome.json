@@ -1,0 +1,43 @@
+{
+  "expected_data_object": {
+    "score": 0.25,
+    "tests": [
+      {
+        "max_points": 1,
+        "name": "total",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_server_data.py::test_total[student_code]",
+        "message": ""
+      },
+      {
+        "max_points": 1,
+        "name": "total",
+        "outcome": "error",
+        "points": 0.0,
+        "points_frac": 0.0,
+        "test_id": "test_server_data.py::test_total[student_code_import]",
+        "message": "Module 'pytest_prairielearn_grader.server_data' can only be imported by setup code."
+      },
+      {
+        "max_points": 1,
+        "name": "total",
+        "outcome": "error",
+        "points": 0.0,
+        "points_frac": 0.0,
+        "test_id": "test_server_data.py::test_total[student_code_import_from_package]",
+        "message": "Module 'pytest_prairielearn_grader.server_data' can only be imported by setup code."
+      },
+      {
+        "max_points": 1,
+        "name": "total",
+        "outcome": "error",
+        "points": 0.0,
+        "points_frac": 0.0,
+        "test_id": "test_server_data.py::test_total[student_code_import_package]",
+        "message": "Module 'pytest_prairielearn_grader.server_data' can only be imported by setup code."
+      }
+    ]
+  }
+}

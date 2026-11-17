@@ -1,0 +1,25 @@
+{
+  "expected_data_object": {
+    "score": 0.5,
+    "tests": [
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "setup code",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_server_data_workspace.py::test_setup_code"
+      },
+      {
+        "max_points": 1,
+        "message": "reader.read() raised ImportError: Module 'pytest_prairielearn_grader.server_data' can only be imported by setup code.",
+        "name": "student code",
+        "outcome": "failed",
+        "points": 0.0,
+        "points_frac": 0.0,
+        "test_id": "test_server_data_workspace.py::test_student_code"
+      }
+    ]
+  }
+}

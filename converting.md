@@ -271,9 +271,10 @@ First, move what you can out of the setup code, as described in [Where code belo
 
 If nothing is left, delete `setup_code.py`. Otherwise, update what's left. Setup code runs inside the sandbox, so some things that worked in the legacy grader don't:
 
-- **Parameters.** `data` isn't defined. Use `__data_params`, which is `data["params"]`. Values that
+- **Parameters.** `data` isn't defined. Import `params`, which is `data["params"]`, with
+  `from pytest_prairielearn_grader.server_data import from_server_json, params`. Values that
   `server.py` stored with `pl.to_json` arrive still encoded: decode them with
-  `__from_server_json(__data_params["A"])`. The `prairielearn` package isn't available.
+  `from_server_json(params["A"])`. The `prairielearn` package isn't available.
 - **Restrictions.** Setup code runs with the same builtins and import rules as student code. For
   example, it can't call `open` or import `os`. To read a data file, list it in `data_files` and use
   a library function such as `np.loadtxt`.

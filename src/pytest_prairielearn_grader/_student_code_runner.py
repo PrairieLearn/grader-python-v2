@@ -239,6 +239,37 @@ def _make_blocked_function(entry: str) -> Callable[..., Any]:
     return blocked
 
 
+SERVER_DATA_PACKAGE = "pytest_prairielearn_grader"
+SERVER_DATA_MODULE = f"{SERVER_DATA_PACKAGE}.server_data"
+
+
+class ServerDataImport:
+    """
+    Gives setup code its own copy of the server_data module, holding this sandbox's params.
+
+    The copy is kept out of sys.modules, and it can only be imported until the setup code
+    finishes, so student code can't read the params.
+    """
+
+    def __init__(self, params: dict[str, Any]) -> None:
+        self.module = types.ModuleType(SERVER_DATA_MODULE)
+        self.module.params = params  # type: ignore[attr-defined]
+        self.module.from_server_json = from_server_json  # type: ignore[attr-defined]
+        # `import pytest_prairielearn_grader.server_data` and `from pytest_prairielearn_grader
+        # import server_data` both get the top-level package back from __import__.
+        self.package = types.ModuleType(SERVER_DATA_PACKAGE)
+        self.package.server_data = self.module  # type: ignore[attr-defined]
+        self.available = True
+
+    def matches(self, name: str, fromlist: Sequence[str]) -> bool:
+        return name == SERVER_DATA_MODULE or (name == SERVER_DATA_PACKAGE and "server_data" in fromlist)
+
+    def load(self, name: str, fromlist: Sequence[str]) -> types.ModuleType:
+        if not self.available:
+            raise ImportError(f"Module '{SERVER_DATA_MODULE}' can only be imported by setup code.")
+        return self.module if name == SERVER_DATA_MODULE and fromlist else self.package
+
+
 class _HelperModules:
     """
     Loads the modules named by the helper_modules setting from the source sent by the grader.
@@ -280,6 +311,7 @@ def get_custom_importer(
     import_blacklist: list[str] | None,
     workspace_dir: str | None = None,
     helper_modules: _HelperModules | None = None,
+    server_data: ServerDataImport | None = None,
 ) -> ImportFunction:
     """
     Returns a custom import function that restricts imports based on the provided whitelist and
@@ -293,6 +325,9 @@ def get_custom_importer(
 
     Modules in *helper_modules* can be imported without being on the whitelist, and they take
     priority over workspace files with the same name. The grader rejects any that are blacklisted.
+
+    *server_data* provides the server_data module to setup code, whatever the whitelist and
+    blacklist say.
     """
 
     original_import = _REAL_IMPORT
@@ -327,6 +362,9 @@ def get_custom_importer(
             importer_file = sys._getframe(1).f_globals.get("__file__")
             if isinstance(importer_file, str) and not importer_file.startswith(_ws_str + os.sep):
                 return original_import(name, globals, locals, fl, level)
+
+        if server_data is not None and server_data.matches(name, fl):
+            return server_data.load(name, fl)
 
         if helper_modules is not None and name in helper_modules:
             return helper_modules.load(name)
@@ -432,10 +470,12 @@ async def student_code_runner(
     student_code_vars["__builtins__"] = get_builtins(builtin_whitelist)
 
     student_code_vars["__builtins__"]["__name__"] = "__main__"  # Set __name__ to "__main__" to mimic the main module
+    server_data = ServerDataImport(local_vars.get("__data_params", {}))
     student_code_vars["__builtins__"]["__import__"] = get_custom_importer(
         import_whitelist,
         import_blacklist,
         helper_modules=None if helper_modules is None else _HelperModules(helper_modules, student_code_vars["__builtins__"]),
+        server_data=server_data,
     )
     _block_blacklisted_functions(import_blacklist)
 
@@ -458,6 +498,8 @@ async def student_code_runner(
         execution_error = e
         # TODO need to create a different message for setup code errors. This should result
         # in a different error message reported from the test case.
+
+    server_data.available = False
 
     # Only inject variables that are explicitly listed in names_for_user_list
     # This prevents accidental variable leaking from setup_code or starting_vars
@@ -562,11 +604,13 @@ async def workspace_runner(
     student_code_vars: dict[str, Any] = {}
     student_code_vars["__builtins__"] = get_builtins(builtin_whitelist)
     student_code_vars["__builtins__"]["__name__"] = "__main__"
+    server_data = ServerDataImport(local_vars.get("__data_params", {}))
     workspace_importer = get_custom_importer(
         import_whitelist,
         import_blacklist,
         workspace_dir,
         helper_modules=None if helper_modules is None else _HelperModules(helper_modules, student_code_vars["__builtins__"]),
+        server_data=server_data,
     )
     _block_blacklisted_functions(import_blacklist)
     student_code_vars["__builtins__"]["__import__"] = workspace_importer
@@ -593,6 +637,8 @@ async def workspace_runner(
         execution_error = asyncio.TimeoutError("Setup code execution timed out")
     except Exception as e:
         execution_error = e
+
+    server_data.available = False
 
     if names_for_user_list is not None:
         for var_name in names_for_user_list:
