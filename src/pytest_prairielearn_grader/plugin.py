@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from typing import Literal
 from typing import NamedTuple
 from typing import cast
 
@@ -69,7 +70,9 @@ class SubtestResult:
     excinfo: pytest.ExceptionInfo[BaseException] | None
 
 
-def format_failure(excinfo: pytest.ExceptionInfo[BaseException], output_level: GradingOutputLevel, when: str) -> str:
+def format_failure(
+    excinfo: pytest.ExceptionInfo[BaseException], output_level: GradingOutputLevel, when: Literal["setup", "call", "teardown"]
+) -> str:
     """Format the exception that failed a test, or one of its subtests, for the test's output level."""
     if isinstance(excinfo.value, SandboxStartupFailed):
         # The sandbox startup handler already formatted this message for the
