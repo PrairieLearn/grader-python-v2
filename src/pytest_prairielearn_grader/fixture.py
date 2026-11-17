@@ -399,16 +399,20 @@ class _SandboxBase:
         try:
             data: StudentFunctionResponse = self._read_query_response()
         except TimeoutError as error:
-            self._timed_out_call = f"{format_call(function_name, args, kwargs)} timed out after {query_timeout} seconds"
             data = {
                 "status": FunctionStatusCode.TIMEOUT,
                 "value": None,
                 "stdout": "",
                 "stderr": "",
                 "exception_name": type(error).__name__,
-                "exception_message": f"{self._timed_out_call}.",
+                "exception_message": None,
                 "traceback": None,
             }
+        # The student process also times out the call, and its reply can arrive before the socket
+        # read times out. Either way, the function may still be running, so stop the sandbox.
+        if data["status"] == FunctionStatusCode.TIMEOUT:
+            self._timed_out_call = f"{format_call(function_name, args, kwargs)} timed out after {query_timeout} seconds"
+            data["exception_message"] = f"{self._timed_out_call}."
         if data.get("stdout"):
             self._accumulated_stdout.append(data["stdout"])
         return data
