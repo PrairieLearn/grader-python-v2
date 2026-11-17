@@ -110,11 +110,8 @@ checks the result:
 
 ```python
 import pytest
-from pytest_prairielearn_grader import ConfigObject
 from pytest_prairielearn_grader.assertions import assert_fn_approx_equal
 from pytest_prairielearn_grader.fixture import StudentFixture
-
-autograder_config = ConfigObject(output_level="friendly")
 
 
 @pytest.mark.grading_data(name="Average of one number", points=1)
@@ -134,7 +131,8 @@ def test_several(sandbox: StudentFixture, values: list[float]) -> None:
   tolerance. On a failure, the student sees which call was checked, the expected value and their
   value. See [Checking Answers](#checking-answers) for the other helpers and for checks that hide the
   expected value.
-- The `friendly` output level shows students only the assertion's message, without a traceback.
+- Students see only the assertion's message, because `friendly` is the default
+  [output level](#output-levels).
 - Expected values are computed in the test. Don't put a reference solution in a file that student
   code can read.
 
@@ -262,6 +260,9 @@ These fixtures are provided by the `pytest-prairielearn-grader` package:
 6. **`workspace_sandbox: WorkspaceFixture`**: For multi-file workspace projects. See
    [Workspace Grading](#workspace-grading).
 
+pytest's built-in **`subtests: pytest.Subtests`** fixture splits a test's points across many
+inputs. See [Checking Many Inputs](#checking-many-inputs).
+
 For implementation details, see the [fixture source code](https://github.com/prairielearn/grader-python-v2/blob/main/src/pytest_prairielearn_grader/fixture.py).
 
 ### Querying Student Code
@@ -312,9 +313,8 @@ def test_function(sandbox: StudentFixture) -> None:
 
 You don't need to catch these errors: they fail the test with a message saying what went wrong.
 
-Each call has a 1 second timeout by default. See [Function Timeout](#4-function-timeout). When a
-test calls a student function many times, use `query_function_raw` and stop after the first
-`"timeout"` status, so that a slow function doesn't use up the grading job's time.
+Each call has a 1 second timeout by default. See [Function Timeout](#4-function-timeout). To give
+partial credit across many calls, see [Checking Many Inputs](#checking-many-inputs).
 
 **Testing for specific exceptions with `query_function_raw`:**
 
@@ -341,7 +341,7 @@ def test_raises_value_error(sandbox: StudentFixture, feedback: FeedbackFixture) 
 
 The `query_function_raw` response contains:
 
-- `status`: One of `"success"`, `"exception"`, `"timeout"`, `"not_found"`, or `"not_serializable"`. `"not_found"` means the function doesn't exist, and only the lookup can cause it: an error raised while the function runs, even a `KeyError` or `ImportError`, is `"exception"`. `"not_serializable"` means the function finished, but its return value can't be sent back to the grader. `exception_message` explains this, and later queries on the sandbox still work.
+- `status`: One of `"success"`, `"exception"`, `"timeout"`, `"not_found"`, or `"not_serializable"`. After a `"timeout"`, later queries on the sandbox raise an error: see [Function Timeout](#4-function-timeout). `"not_found"` means the function doesn't exist, and only the lookup can cause it: an error raised while the function runs, even a `KeyError` or `ImportError`, is `"exception"`. `"not_serializable"` means the function finished, but its return value can't be sent back to the grader. `exception_message` explains this, and later queries on the sandbox still work.
 - `value`: The return value (when status is `"success"`)
 - `stdout` / `stderr`: Captured output from the function call
 - `exception_name`: The exception class name (e.g., `"ValueError"`)
@@ -374,6 +374,12 @@ Control execution time for individual function calls:
 # Set a 2-second timeout for this specific function call
 result = sandbox.query_function("slow_computation", data, query_timeout=2.0)
 ```
+
+After any query times out, every later query on that sandbox raises `SandboxStopped`. The student
+code may still send the late answer, which would otherwise be read as the answer to the next call.
+So a timeout fails the rest of the test, and with a [module-scoped sandbox](#module-scoped-sandbox),
+the later tests that use it too. In a [subtests loop](#checking-many-inputs), the inputs before the
+timeout keep their credit.
 
 #### 5. Query Setup Variables
 
@@ -474,17 +480,18 @@ shows both frames.
 
 The output level sets how much of a failure students see:
 
-| Level         | Shows to student                                              |
-| ------------- | ------------------------------------------------------------- |
-| `"none"`      | Exception class name only (e.g., `AssertionError`)            |
-| `"message"`   | Exception name + first line of message _(default when unset)_ |
-| `"traceback"` | Exception name + message + full traceback                     |
-| `"friendly"`  | Only the exception message text — no class name, no traceback |
+| Level         | Shows to student                                                                                                                                                          |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"friendly"`  | The exception message only, with no class name _(default)_. If a call to a student function raised the error, the message includes the traceback from the student's code. |
+| `"none"`      | Exception class name only (e.g., `AssertionError`)                                                                                                                        |
+| `"message"`   | Exception name + first line of message                                                                                                                                    |
+| `"traceback"` | Exception name + message + full traceback                                                                                                                                 |
 
-Use `"friendly"` with the assertion helpers. Set it on one test:
+The default, `"friendly"`, works well with the assertion helpers. To show more, such as the full
+traceback for advanced students, set a different level on one test:
 
 ```python
-@pytest.mark.output(level="friendly")
+@pytest.mark.output(level="traceback")
 @pytest.mark.grading_data(name="Test addition", points=5)
 def test_add(sandbox: StudentFixture) -> None:
     assert_fn_equal(sandbox, "add", args=(2, 3), expected=5)
@@ -493,18 +500,17 @@ def test_add(sandbox: StudentFixture) -> None:
 On every test in a file, with a module-level `pytestmark`:
 
 ```python
-pytestmark = pytest.mark.output(level="friendly")
+pytestmark = pytest.mark.output(level="traceback")
 ```
 
 Or in the `ConfigObject`:
 
 ```python
-autograder_config = ConfigObject(output_level="friendly")
+autograder_config = ConfigObject(output_level="traceback")
 ```
 
 With the `ConfigObject` approach, individual tests can still override it with
-`@pytest.mark.output(level="traceback")`. The `"message"` and `"traceback"` levels can help
-advanced students, who can learn from reading tracebacks.
+`@pytest.mark.output(level=...)`.
 
 ### Partial Credit and Feedback
 
@@ -539,6 +545,52 @@ def test_with_partial_credit(sandbox: StudentFixture, feedback: FeedbackFixture)
 - `feedback.set_score_final(fraction)`: Set final score (prevents further updates)
 - `feedback.add_message(msg)`: Add custom feedback message
 - `feedback.add_image(image, label=None)`: Show an image with the test's results. See [Showing Plots to Students](#showing-plots-to-students)
+
+### Checking Many Inputs
+
+To split a test's points across many inputs, check each input in a `subtests.test()` block, using
+pytest's built-in `subtests` fixture:
+
+```python
+@pytest.mark.grading_data(name="Check random values", points=3)
+def test_random_values(sandbox: StudentFixture, subtests: pytest.Subtests) -> None:
+    for n in [2, 3, 5, 8, 13, 17, 19, 23, 27, 29]:
+        with subtests.test():
+            assert_fn_equal(sandbox, "fib", args=(n,), expected=fib(n))
+```
+
+A failed assertion or exception inside a block fails only that block, and the loop goes on. The
+test's score is the fraction of blocks that passed:
+
+- A block that calls `pytest.skip` counts as failed.
+- If the test fails outside any block, its score is 0, or the last score it set with
+  `feedback.set_score`.
+- `feedback.set_score_final` replaces the fraction.
+
+The test's message starts with how many blocks passed, such as `7/10 checks passed.`, followed by
+the messages of the first 5 failed blocks. Passed blocks aren't listed. Pass a label to show it
+before a block's message, such as `subtests.test(f"last_element({lst})")`. The `assert_fn_*`
+helpers already name the call, so they don't need one.
+
+A block can check several things about one input:
+
+```python
+@pytest.mark.grading_data(name="last_element", points=10)
+def test_last_element(sandbox: StudentFixture, subtests: pytest.Subtests) -> None:
+    for _ in range(10):
+        lst = random.sample(range(1000), k=random.randint(1, 20))
+        with subtests.test(f"last_element({lst})"):
+            value, lst_after = sandbox.query_function("last_element_and_list", lst)
+            assert_equal(value, lst[-1])
+            assert_equal(lst_after, lst, msg="Your function should not modify the input list.")
+```
+
+When a call times out, the remaining blocks fail without running student code, and the message
+says so once: `The remaining 3 checks didn't run because fib(23) timed out after 1.0 seconds.`
+See [Function Timeout](#4-function-timeout).
+
+Use `@pytest.mark.parametrize` instead when each input should be its own test, with its own name
+and points.
 
 ### Capturing and Testing Output
 
@@ -901,7 +953,7 @@ All parameters are optional:
 | Parameter                  | Default                                            | Description                                                                                                                                |
 | -------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `sandbox_timeout`          | `1.0`                                              | Seconds allowed for starting the sandbox, which runs the setup code and student code. See [Timeout Configuration](#timeout-configuration). |
-| `output_level`             | `None`                                             | Default [output level](#output-levels) for every test.                                                                                     |
+| `output_level`             | `None`                                             | Default [output level](#output-levels) for every test. `None` means `"friendly"`.                                                          |
 | `names_for_user`           | `None`                                             | Variables to give student code. See [Giving Values to Student Code](#giving-values-to-student-code).                                       |
 | `starting_vars`            | `{}`                                               | Values for names in `names_for_user`.                                                                                                      |
 | `student_code_pattern`     | `"student_code*.py"`                               | Glob pattern for the student's file.                                                                                                       |
@@ -1955,8 +2007,8 @@ To see more examples of what is possible in these test files, look at the test c
 
 1. **Keep code in the tests**: See [Where Code Belongs](#where-code-belongs).
 2. **Use descriptive test names**: The `name` in `@pytest.mark.grading_data` is shown to students.
-3. **Use friendly messages that don't give away answers**: Use the assertion helpers with the
-   `friendly` output level, and `assert_true` for hidden test cases.
+3. **Use friendly messages that don't give away answers**: Use the assertion helpers, and
+   `assert_true` for hidden test cases.
 4. **Test incrementally**: Break complex problems into smaller tests with partial credit.
 5. **Prefer `parametrize`**: Use `@pytest.mark.parametrize` for several inputs instead of a loop,
    unless the inputs share partial credit.

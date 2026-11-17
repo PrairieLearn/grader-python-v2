@@ -253,12 +253,14 @@ class ConfigObject:
     Individual tests can override this with ``@pytest.mark.output(level="...")``.
 
     Levels:
+    - ``"friendly"``: Show only the exception message, with no class name
+      (default when None). Designed for use with the ``assert_equal`` /
+      ``assert_fn_equal`` helpers to produce clean, student-readable output.
+      If a call to a student function raised the error, the message includes
+      the traceback from the student's code.
     - ``"none"``: Show only the exception class name (e.g., ``AssertionError``).
-    - ``"message"``: Show exception name + first line of message (default when None).
+    - ``"message"``: Show exception name + first line of message.
     - ``"traceback"``: Show exception name + message + full traceback.
-    - ``"friendly"``: Show only the exception message text with no traceback or
-      class name. Designed for use with the ``assert_equal`` / ``assert_fn_equal``
-      helpers to produce clean, student-readable output.
 
     When None, the plugin default of ``"message"`` is used unless overridden
     by a per-test ``@pytest.mark.output(level=...)`` marker.

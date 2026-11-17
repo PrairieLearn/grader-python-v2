@@ -11,6 +11,22 @@ import dill
 import pytest
 
 
+def format_value(value: Any, *, max_len: int = 200) -> str:
+    """Return a repr of *value*, truncated for readability."""
+    text = repr(value)
+    if len(text) > max_len:
+        text = text[: max_len - 3] + "..."
+    return text
+
+
+def format_call(func_name: str, args: tuple[Any, ...], kwargs: dict[str, Any] | None) -> str:
+    """Format ``func_name(args, kwargs)`` for display."""
+    parts: list[str] = [format_value(a, max_len=60) for a in args]
+    if kwargs:
+        parts.extend(f"{k}={format_value(v, max_len=60)}" for k, v in kwargs.items())
+    return f"{func_name}({', '.join(parts)})"
+
+
 class GradingOutputLevel(StrEnum):
     ExceptionName = "none"
     ExceptionMessage = "message"
@@ -33,8 +49,8 @@ class FunctionStatusCode(StrEnum):
     Status codes for a function execution.
 
     A timeout indicates that the function call did not produce a response within
-    the requested interval. Callers must stop issuing requests on that sandbox
-    after receiving this status.
+    the requested interval. After this status, every later query on that sandbox
+    raises SandboxStopped.
 
     NOT_SERIALIZABLE means the function finished but its return value can't be sent
     to the grader. The sandbox can still be used after this status.
@@ -398,4 +414,4 @@ def get_output_level_marker(marker: pytest.Mark | None, config_level: str | None
         except ValueError:
             pass
 
-    return GradingOutputLevel.ExceptionMessage
+    return GradingOutputLevel.Friendly

@@ -162,8 +162,6 @@ import pytest
 from pytest_prairielearn_grader.assertions import assert_approx_equal
 from pytest_prairielearn_grader.fixture import StudentFixture
 
-pytestmark = pytest.mark.output(level="friendly")
-
 
 @pytest.mark.grading_data(name="x_sq", points=10)
 def test_x_sq(sandbox: StudentFixture, data_json: dict) -> None:
@@ -189,7 +187,7 @@ regrade of a variant, and `question.html` could show it with `{{params.x}}`.
 | `Feedback.set_score(s)`                            | `feedback.set_score(s)` with the `feedback` fixture. See [Scoring](#scoring).                                         |
 | `Feedback.add_feedback("...")`                     | `feedback.add_message("...")`                                                                                         |
 | `accuracy_critical=True`                           | A failed assertion ends the test. Other tests still run.                                                              |
-| `total_iters = 3` and `@not_repeated`              | `@pytest.mark.parametrize` over the inputs, or a loop with partial credit                                             |
+| `total_iters = 3` and `@not_repeated`              | `@pytest.mark.parametrize` over the inputs, or a loop of `subtests.test()` blocks for partial credit                  |
 | `Feedback.not_allowed`                             | `import_blacklist=["numpy.linalg.inv"]` in the `ConfigObject`. See [Update the setup code](#4-update-the-setup-code). |
 | `repeated_setup()`                                 | Not needed: setup code runs again for each sandbox.                                                                   |
 
@@ -234,9 +232,8 @@ The `plots` example question is a converted plot question.
 
 ### Feedback messages
 
-Use `@pytest.mark.output(level=GradingOutputLevel.Friendly)` on each test, as the example questions
-do, or `output_level="friendly"` in the `ConfigObject`. At this level the student sees only the
-assertion's message.
+The default `friendly` [output level](quick_start.md#output-levels) shows the student only the
+assertion's message, so tests don't need `@pytest.mark.output`.
 
 Follow [Hiding Expected Values](quick_start.md#hiding-expected-values): don't use a bare `assert`
 or numpy testing functions, and use `assert_true` for hidden test cases. The comparison helpers show
@@ -249,6 +246,9 @@ legacy feedback where you can, such as `"x is inaccurate"`.
 - A test that fails gets the last score it set with `feedback.set_score`, or 0. Call `set_score`
   after each check that earns partial credit.
 - `feedback.set_score_final(s)` sets the score even if the test then fails.
+- A legacy loop that adds up how many inputs were correct becomes a loop of `subtests.test()`
+  blocks. The test gets the fraction of blocks that passed. See
+  [Checking Many Inputs](quick_start.md#checking-many-inputs).
 - The legacy pattern of `if check: set_score(1) else: set_score(0)` becomes a plain assertion.
 
 ### Querying
@@ -257,8 +257,8 @@ legacy feedback where you can, such as `"x is inaccurate"`.
   the test with a message that says so. You don't need to check this yourself.
 - Each call to `query_function` has a 1 second timeout by default. Pass `query_timeout=` for slower
   functions.
-- When a test calls a student function several times, use `query_function_raw` and stop after the
-  first `"timeout"` status: see the `randomFunctionName` example question.
+- After a call times out, later queries on the sandbox fail without running student code, so a
+  slow function can't use up the grading job's time. You don't need to stop a loop yourself.
 
 ## 4. Update the setup code
 

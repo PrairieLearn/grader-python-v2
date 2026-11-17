@@ -22,7 +22,7 @@
       },
       {
         "max_points": 6,
-        "message": "Student code execution failed with an exception: RuntimeError",
+        "message": "Calling sympy.series is not allowed in this question.",
         "name": "Test analyze_vibration function",
         "outcome": "error",
         "points_frac": 0.0,
@@ -31,7 +31,7 @@
       },
       {
         "max_points": 6,
-        "message": "Student code execution failed with an exception: RuntimeError",
+        "message": "Calling sympy.series is not allowed in this question.",
         "name": "Test analyze_vibration function",
         "outcome": "error",
         "points_frac": 0.0,

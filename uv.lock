@@ -907,7 +907,7 @@ requires-dist = [
     { name = "dill", specifier = ">=0.4.0" },
     { name = "nbformat", marker = "extra == 'notebook'", specifier = ">=5.0" },
     { name = "prettytable", specifier = ">=3.8.0" },
-    { name = "pytest" },
+    { name = "pytest", specifier = ">=9.0,<10" },
 ]
 provides-extras = ["notebook"]
 

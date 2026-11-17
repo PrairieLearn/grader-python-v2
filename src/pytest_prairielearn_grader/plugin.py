@@ -4,9 +4,11 @@ import os
 import sys
 from collections.abc import Iterable
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from typing import Literal
 from typing import NamedTuple
 from typing import cast
 
@@ -20,6 +22,7 @@ from prettytable import PrettyTable
 
 from .config import ConfigObject
 from .fixture import FeedbackFixture
+from .fixture import SandboxStopped
 from .fixture import StudentFiles
 from .fixture import StudentFixture
 from .fixture import WorkspaceFixture
@@ -33,6 +36,8 @@ logger = logging.getLogger(__name__)
 # Default configuration constants
 DEFAULT_SANDBOX_TIMEOUT = 1.0
 DEFAULT_IMPORT_BLACKLIST = ["os", "sys", "subprocess", "pathlib", "shutil"]
+# Failing subtests shown in a test's message. The rest are only counted, to keep the message readable.
+MAX_SHOWN_SUBTEST_FAILURES = 5
 
 
 class SandboxStartupFailed(Failed):
@@ -54,6 +59,85 @@ class TestResult(NamedTuple):
     report: _pytest.reports.TestReport
     call: pytest.CallInfo
     stdout: str
+
+
+@dataclass(frozen=True, slots=True)
+class SubtestResult:
+    """The result of one `subtests.test()` block in a test."""
+
+    label: str | None
+    outcome: str
+    excinfo: pytest.ExceptionInfo[BaseException] | None
+
+
+def format_failure(
+    excinfo: pytest.ExceptionInfo[BaseException], output_level: GradingOutputLevel, when: Literal["setup", "call", "teardown"]
+) -> str:
+    """Format the exception that failed a test, or one of its subtests, for the test's output level."""
+    if isinstance(excinfo.value, SandboxStartupFailed):
+        # The sandbox startup handler already formatted this message for the
+        # output level, so show it in full without another exception header.
+        return str(excinfo.value)
+
+    if output_level == GradingOutputLevel.Friendly:
+        # Friendly mode: show only the exception message text with
+        # no exception class name, traceback, or "failed with" prefix.
+        return str(excinfo.value)
+
+    # Customize the message based on the failure phase
+    if when == "setup":
+        phase_message = "Student code execution failed with an exception"
+    elif when == "teardown":
+        phase_message = "Student code teardown failed with an exception"
+    else:
+        phase_message = "Student code grading failed with an exception"
+
+    if output_level == GradingOutputLevel.ExceptionName:
+        return f"{phase_message}: {excinfo.type.__name__}"
+
+    if output_level == GradingOutputLevel.ExceptionMessage:
+        # TODO make this work with multiline messages somehow?
+        exception_message = str(excinfo.value).split(os.linesep)[0]
+        return f"{phase_message}: {excinfo.type.__name__}{os.linesep}Exception Message: {exception_message}"
+
+    # If showing more than the exception name, show the message + full traceback
+    return str(excinfo.getrepr(style="no"))
+
+
+def format_subtest_results(subtests: list[SubtestResult], output_level: GradingOutputLevel) -> str:
+    """
+    Summarize a test's subtests: how many passed, the first few failures, and the checks that
+    didn't run because the sandbox stopped after a timeout.
+    """
+    passed = sum(subtest.outcome == "passed" for subtest in subtests)
+    blocks = [f"{passed}/{len(subtests)} checks passed."]
+
+    stopped: list[SandboxStopped] = []
+    shown: list[SubtestResult] = []
+    for subtest in subtests:
+        if subtest.excinfo is not None and isinstance(subtest.excinfo.value, SandboxStopped):
+            stopped.append(subtest.excinfo.value)
+        elif subtest.outcome != "passed":
+            shown.append(subtest)
+
+    for subtest in shown[:MAX_SHOWN_SUBTEST_FAILURES]:
+        message = format_failure(subtest.excinfo, output_level, "call") if subtest.excinfo is not None else subtest.outcome
+        if subtest.label is None:
+            blocks.append(message)
+        elif "\n" in message:
+            blocks.append(f"{subtest.label}:{os.linesep}{message}")
+        else:
+            blocks.append(f"{subtest.label}: {message}")
+
+    if len(shown) > MAX_SHOWN_SUBTEST_FAILURES:
+        hidden = len(shown) - MAX_SHOWN_SUBTEST_FAILURES
+        blocks.append(f"...and {hidden} more {'check' if hidden == 1 else 'checks'} failed.")
+
+    if stopped:
+        remaining = "The remaining check" if len(stopped) == 1 else f"The remaining {len(stopped)} checks"
+        blocks.append(f"{remaining} didn't run because {stopped[0].timed_out_call}.")
+
+    return (os.linesep * 2).join(blocks)
 
 
 def get_tests_dir(test_module: ModuleType) -> Path | None:
@@ -867,6 +951,10 @@ def pytest_configure(config: Config) -> None:
 
 class ResultCollectorPlugin:
     collected_results: dict[str, TestResult]
+    # The call result made for each test and each of its subtests, waiting for
+    # pytest_runtest_logreport to say which one it was.
+    pending_calls: dict[str, TestResult]
+    subtest_results: dict[str, list[SubtestResult]]
     student_feedback_data: dict[str, FeedbackFixture]
     grading_data: dict[str, Any]
     module_sandbox_cache: dict[tuple[str, str], StudentFixture]
@@ -876,6 +964,8 @@ class ResultCollectorPlugin:
 
     def __init__(self) -> None:
         self.collected_results = {}
+        self.pending_calls = {}
+        self.subtest_results = {}
         self.student_feedback_data = {}
         self.grading_data = {}
         self.module_sandbox_cache = {}
@@ -931,12 +1021,9 @@ class ResultCollectorPlugin:
                     if stdout_content.strip():  # Only store if there's actual content
                         accumulated_stdout = stdout_content
 
-            self.collected_results[report.nodeid] = TestResult(report=report, call=call, stdout=accumulated_stdout)
-            # You could store more details here if needed
-            # item.config.my_test_results[report.nodeid] = {
-            #     "outcome": report.outcome,
-            #     "duration": report.duration,
-            # }
+            # pytest also calls this hook for each subtest, with the subtest's call info,
+            # so pytest_runtest_logreport decides where the result goes.
+            self.pending_calls[report.nodeid] = TestResult(report=report, call=call, stdout=accumulated_stdout)
 
         fixture = None
         # This code section appears to be unused legacy code
@@ -950,6 +1037,21 @@ class ResultCollectorPlugin:
             # )
         # if fixture:
         #     fixture.skipped = outcome.get_result().outcome == "skipped"
+
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        """
+        Sort each call result into the test's own result or one of its subtests' results.
+        """
+        if report.when != "call" or report.nodeid not in self.pending_calls:
+            return
+
+        result = self.pending_calls.pop(report.nodeid)
+        if isinstance(report, pytest.SubtestReport):
+            self.subtest_results.setdefault(report.nodeid, []).append(
+                SubtestResult(label=report.context.msg, outcome=report.outcome, excinfo=result.call.excinfo)
+            )
+        else:
+            self.collected_results[report.nodeid] = result
 
     @pytest.fixture
     def feedback(self, request: pytest.FixtureRequest) -> FeedbackFixture:
@@ -1018,48 +1120,18 @@ class ResultCollectorPlugin:
                 # Create an empty feedback object if none was created during the test
                 feedback_obj = FeedbackFixture(test_id=nodeid)
 
-            # If the test failed (in any phase), add the exception message to the feedback
+            config_level = _get_config_output_level(getattr(item, "module", None))
+            output_level: GradingOutputLevel = get_output_level_marker(item.get_closest_marker("output"), config_level)
+            logger.debug(f"Grading output level set to: {output_level}")
+
+            subtests = self.subtest_results.get(nodeid, [])
+            if subtests:
+                feedback_obj.add_message(format_subtest_results(subtests, output_level))
+
+            # If the test failed (in any phase), add the exception message to the feedback.
+            # A test whose subtests failed is also marked failed, but without exception info.
             if report.outcome == "failed" and call.excinfo is not None:
-                config_level = _get_config_output_level(getattr(item, "module", None))
-                output_level: GradingOutputLevel = get_output_level_marker(item.get_closest_marker("output"), config_level)
-
-                logger.debug(f"Grading output level set to: {output_level}")
-
-                if isinstance(call.excinfo.value, SandboxStartupFailed):
-                    # The sandbox startup handler already formatted this message for the
-                    # output level, so show it in full without another exception header.
-                    feedback_obj.add_message(str(call.excinfo.value))
-
-                elif output_level == GradingOutputLevel.Friendly:
-                    # Friendly mode: show only the exception message text with
-                    # no exception class name, traceback, or "failed with" prefix.
-                    exception_message = str(call.excinfo.value)
-                    feedback_obj.add_message(exception_message)
-
-                else:
-                    # Customize the message based on the failure phase
-                    if report.when == "setup":
-                        phase_message = "Student code execution failed with an exception"
-                    elif report.when == "teardown":
-                        phase_message = "Student code teardown failed with an exception"
-                    else:
-                        phase_message = "Student code grading failed with an exception"
-
-                    if output_level == GradingOutputLevel.ExceptionName:
-                        exception_name = call.excinfo.type.__name__
-                        fail_message = f"{phase_message}: {exception_name}"
-                        feedback_obj.add_message(fail_message)
-
-                    elif output_level == GradingOutputLevel.ExceptionMessage:
-                        exception_name = call.excinfo.type.__name__
-                        # TODO make this work with multiline messages somehow?
-                        exception_message = str(call.excinfo.value).split(os.linesep)[0]
-                        fail_message = f"{phase_message}: {exception_name}{os.linesep}Exception Message: {exception_message}"
-                        feedback_obj.add_message(fail_message)
-
-                    # If showing more than the exception name, show the message + full traceback
-                    else:
-                        feedback_obj.add_message(str(call.excinfo.getrepr(style="no")))
+                feedback_obj.add_message(format_failure(call.excinfo, output_level, report.when))
 
             # Check if stdout feedback should be included (default True)
             include_stdout_feedback = grading_data.get("include_stdout_feedback", True)
@@ -1100,6 +1172,14 @@ class ResultCollectorPlugin:
                     # e.g., "xpassed", "xfailed", etc.
                     # For now, we raise an error for unexpected outcomes
                     raise ValueError(f"Unexpected outcome '{outcome}' for test '{nodeid}'.")
+
+            # A test with subtests gets the fraction of them that passed, and skipped subtests count
+            # as failed. pytest marks the test failed when any subtest fails, so check whether the
+            # test body itself raised instead. If it did, the score from above (0 or set_score) stays.
+            if subtests and report.when == "call" and call.excinfo is None and not feedback_obj.final_score_override:
+                passed = sum(subtest.outcome == "passed" for subtest in subtests)
+                res_obj["points_frac"] = passed / len(subtests)
+                res_obj["outcome"] = "passed" if passed == len(subtests) else "failed"
 
             res_obj["points"] = res_obj["points_frac"] * res_obj["max_points"]
             final_results.append(res_obj)
