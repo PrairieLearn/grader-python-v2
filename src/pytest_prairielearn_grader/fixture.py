@@ -30,6 +30,7 @@ from .utils import StudentQueryResponse
 from .utils import WorkspaceStartRequest
 from .utils import deserialize_object_unsafe
 from .utils import drop_privileges
+from .utils import format_call
 from .utils import serialize_object_unsafe
 
 DataFixture = dict[str, Any]
@@ -48,6 +49,21 @@ _READ_ONLY_DIR_MODE = _READ_ONLY_FILE_MODE | stat.S_IXUSR | stat.S_IXGRP | stat.
 _OWNER_WRITABLE_DIR_MODE = _READ_ONLY_DIR_MODE | stat.S_IWUSR  # rwxr-xr-x
 
 logger = logging.getLogger(__name__)
+
+
+class SandboxStopped(RuntimeError):
+    """
+    Raised by a query on a sandbox where an earlier query timed out.
+
+    The student code may still send the reply to the call that timed out, and a later query would
+    read it as its own answer. So after a timeout, the sandbox refuses all further queries.
+    """
+
+    timed_out_call: str
+
+    def __init__(self, timed_out_call: str) -> None:
+        super().__init__(f"This check didn't run because {timed_out_call}.")
+        self.timed_out_call = timed_out_call
 
 
 def _extract_notebook_code(notebook_path: Path, cell_tag: str | None = None) -> str:
@@ -209,6 +225,7 @@ class _SandboxBase:
     _data_files_dir: Path | None
     _accumulated_stdout: list[str]
     _server_failure: str | None
+    _timed_out_call: str | None
 
     def __init__(
         self,
@@ -232,6 +249,7 @@ class _SandboxBase:
         self.student_socket = None
         self._accumulated_stdout = []
         self._server_failure = None
+        self._timed_out_call = None
 
     def _assert_process_running(self) -> None:
         assert self.process is not None, "Sandbox process is not running. Please start it first."
@@ -268,6 +286,8 @@ class _SandboxBase:
     def _assert_no_server_failure(self) -> None:
         if self._server_failure is not None:
             raise RuntimeError(self._server_failure)
+        if self._timed_out_call is not None:
+            raise SandboxStopped(self._timed_out_call)
 
     def _read_query_response(self) -> Any:
         """Read a response to a query, raising a clear error if the server failed and closed the connection."""
@@ -335,7 +355,11 @@ class _SandboxBase:
         assert self.student_socket is not None
         self.student_socket.settimeout(query_timeout)
         self._send_json_object(json_message)
-        data: StudentQueryResponse = self._read_query_response()
+        try:
+            data: StudentQueryResponse = self._read_query_response()
+        except TimeoutError as error:
+            self._timed_out_call = f"the query for '{var_to_query}' timed out after {query_timeout} seconds"
+            raise TimeoutError(f"The query for '{var_to_query}' timed out after {query_timeout} seconds.") from error
         return data
 
     def query(self, var_to_query: str, *, query_timeout: float = DEFAULT_TIMEOUT) -> Any:
@@ -354,9 +378,9 @@ class _SandboxBase:
         """Call a student function and return its protocol response.
 
         A socket timeout is returned as ``FunctionStatusCode.TIMEOUT`` rather
-        than raised. Callers must stop issuing requests on this sandbox after a
-        timeout because the student process may still write the timed-out
-        request's response.
+        than raised. After a timeout, every later query on this sandbox raises
+        SandboxStopped, because the student process may still write the
+        timed-out request's response.
 
         Raises a RuntimeError if the sandbox server failed, for example because it
         couldn't load the arguments. The sandbox can't be used after that.
@@ -375,13 +399,14 @@ class _SandboxBase:
         try:
             data: StudentFunctionResponse = self._read_query_response()
         except TimeoutError as error:
+            self._timed_out_call = f"{format_call(function_name, args, kwargs)} timed out after {query_timeout} seconds"
             data = {
                 "status": FunctionStatusCode.TIMEOUT,
                 "value": None,
                 "stdout": "",
                 "stderr": "",
                 "exception_name": type(error).__name__,
-                "exception_message": str(error),
+                "exception_message": f"{self._timed_out_call}.",
                 "traceback": None,
             }
         if data.get("stdout"):
@@ -393,12 +418,10 @@ class _SandboxBase:
         response = self.query_function_raw(function_name, *args, query_timeout=query_timeout, **kwargs)
         match response["status"]:
             case FunctionStatusCode.EXCEPTION:
-                raise RuntimeError(
-                    f"Function '{function_name}' raised an exception "
-                    f"{response['exception_name']}: {response['exception_message']}\n{response['traceback']}"
-                )
+                call = format_call(function_name, args, kwargs)
+                raise RuntimeError(f"{call} raised {response['exception_name']}: {response['exception_message']}\n{response['traceback']}")
             case FunctionStatusCode.TIMEOUT:
-                raise TimeoutError(f"Query for function '{function_name}' timed out after {query_timeout} seconds.")
+                raise TimeoutError(response["exception_message"])
             case FunctionStatusCode.NOT_FOUND:
                 raise NameError(response["exception_message"])
             case FunctionStatusCode.NOT_SERIALIZABLE:
@@ -496,6 +519,7 @@ class StudentFixture(_SandboxBase):
         return self._read_start_response(initialization_timeout)
 
     def query_setup_raw(self, var_to_query: str) -> SetupQueryResponse:
+        self._assert_no_server_failure()
         self._assert_process_running()
         json_message: SetupQueryRequest = {"message_type": MessageType.QUERY_SETUP, "var": var_to_query}
         assert self.student_socket is not None, "Student socket is not connected. Please start the student code server first."

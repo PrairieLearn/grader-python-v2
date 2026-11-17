@@ -82,6 +82,22 @@ Available helpers:
 - `assert_true(condition)` / `assert_false(condition)` — boolean checks
 - `assert_plot_equal(plot, expected)` — compare a matplotlib plot with a reference plot
 
+### Partial Credit Across Inputs
+
+Check each input in a `subtests.test()` block, using pytest's built-in `subtests` fixture. The
+test gets the fraction of blocks that passed, and the student sees the first few failures:
+
+```python
+@pytest.mark.grading_data(name="Check random values", points=3)
+def test_random_values(sandbox: StudentFixture, subtests: pytest.Subtests) -> None:
+    for n in [2, 3, 5, 8, 13]:
+        with subtests.test():
+            assert_fn_equal(sandbox, "fib", args=(n,), expected=fib(n))
+```
+
+After a call to student code times out, the sandbox stops answering queries, so the remaining
+inputs fail without running. See [Checking Many Inputs](quick_start.md#checking-many-inputs).
+
 ### Ungradable Submission Detection
 
 When student code has a `SyntaxError`, the submission is automatically marked as **ungradable** (`"gradable": false` in results). This means the student does not lose a grading attempt and sees a clear error message.

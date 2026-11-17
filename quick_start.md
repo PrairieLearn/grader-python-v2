@@ -260,6 +260,9 @@ These fixtures are provided by the `pytest-prairielearn-grader` package:
 6. **`workspace_sandbox: WorkspaceFixture`**: For multi-file workspace projects. See
    [Workspace Grading](#workspace-grading).
 
+pytest's built-in **`subtests: pytest.Subtests`** fixture splits a test's points across many
+inputs. See [Checking Many Inputs](#checking-many-inputs).
+
 For implementation details, see the [fixture source code](https://github.com/prairielearn/grader-python-v2/blob/main/src/pytest_prairielearn_grader/fixture.py).
 
 ### Querying Student Code
@@ -310,9 +313,8 @@ def test_function(sandbox: StudentFixture) -> None:
 
 You don't need to catch these errors: they fail the test with a message saying what went wrong.
 
-Each call has a 1 second timeout by default. See [Function Timeout](#4-function-timeout). When a
-test calls a student function many times, use `query_function_raw` and stop after the first
-`"timeout"` status, so that a slow function doesn't use up the grading job's time.
+Each call has a 1 second timeout by default. See [Function Timeout](#4-function-timeout). To give
+partial credit across many calls, see [Checking Many Inputs](#checking-many-inputs).
 
 **Testing for specific exceptions with `query_function_raw`:**
 
@@ -339,7 +341,7 @@ def test_raises_value_error(sandbox: StudentFixture, feedback: FeedbackFixture) 
 
 The `query_function_raw` response contains:
 
-- `status`: One of `"success"`, `"exception"`, `"timeout"`, `"not_found"`, or `"not_serializable"`. `"not_found"` means the function doesn't exist, and only the lookup can cause it: an error raised while the function runs, even a `KeyError` or `ImportError`, is `"exception"`. `"not_serializable"` means the function finished, but its return value can't be sent back to the grader. `exception_message` explains this, and later queries on the sandbox still work.
+- `status`: One of `"success"`, `"exception"`, `"timeout"`, `"not_found"`, or `"not_serializable"`. After a `"timeout"`, later queries on the sandbox raise an error: see [Function Timeout](#4-function-timeout). `"not_found"` means the function doesn't exist, and only the lookup can cause it: an error raised while the function runs, even a `KeyError` or `ImportError`, is `"exception"`. `"not_serializable"` means the function finished, but its return value can't be sent back to the grader. `exception_message` explains this, and later queries on the sandbox still work.
 - `value`: The return value (when status is `"success"`)
 - `stdout` / `stderr`: Captured output from the function call
 - `exception_name`: The exception class name (e.g., `"ValueError"`)
@@ -372,6 +374,12 @@ Control execution time for individual function calls:
 # Set a 2-second timeout for this specific function call
 result = sandbox.query_function("slow_computation", data, query_timeout=2.0)
 ```
+
+After any query times out, every later query on that sandbox raises `SandboxStopped`. The student
+code may still send the late answer, which would otherwise be read as the answer to the next call.
+So a timeout fails the rest of the test, and with a [module-scoped sandbox](#module-scoped-sandbox),
+the later tests that use it too. In a [subtests loop](#checking-many-inputs), the inputs before the
+timeout keep their credit.
 
 #### 5. Query Setup Variables
 
@@ -537,6 +545,52 @@ def test_with_partial_credit(sandbox: StudentFixture, feedback: FeedbackFixture)
 - `feedback.set_score_final(fraction)`: Set final score (prevents further updates)
 - `feedback.add_message(msg)`: Add custom feedback message
 - `feedback.add_image(image, label=None)`: Show an image with the test's results. See [Showing Plots to Students](#showing-plots-to-students)
+
+### Checking Many Inputs
+
+To split a test's points across many inputs, check each input in a `subtests.test()` block, using
+pytest's built-in `subtests` fixture:
+
+```python
+@pytest.mark.grading_data(name="Check random values", points=3)
+def test_random_values(sandbox: StudentFixture, subtests: pytest.Subtests) -> None:
+    for n in [2, 3, 5, 8, 13, 17, 19, 23, 27, 29]:
+        with subtests.test():
+            assert_fn_equal(sandbox, "fib", args=(n,), expected=fib(n))
+```
+
+A failed assertion or exception inside a block fails only that block, and the loop goes on. The
+test's score is the fraction of blocks that passed:
+
+- A block that calls `pytest.skip` counts as failed.
+- If the test fails outside any block, its score is 0, or the last score it set with
+  `feedback.set_score`.
+- `feedback.set_score_final` replaces the fraction.
+
+The test's message starts with how many blocks passed, such as `7/10 checks passed.`, followed by
+the messages of the first 5 failed blocks. Passed blocks aren't listed. Pass a label to show it
+before a block's message, such as `subtests.test(f"last_element({lst})")`. The `assert_fn_*`
+helpers already name the call, so they don't need one.
+
+A block can check several things about one input:
+
+```python
+@pytest.mark.grading_data(name="last_element", points=10)
+def test_last_element(sandbox: StudentFixture, subtests: pytest.Subtests) -> None:
+    for _ in range(10):
+        lst = random.sample(range(1000), k=random.randint(1, 20))
+        with subtests.test(f"last_element({lst})"):
+            value, lst_after = sandbox.query_function("last_element_and_list", lst)
+            assert_equal(value, lst[-1])
+            assert_equal(lst_after, lst, msg="Your function should not modify the input list.")
+```
+
+When a call times out, the remaining blocks fail without running student code, and the message
+says so once: `The remaining 3 checks didn't run because fib(23) timed out after 1.0 seconds.`
+See [Function Timeout](#4-function-timeout).
+
+Use `@pytest.mark.parametrize` instead when each input should be its own test, with its own name
+and points.
 
 ### Capturing and Testing Output
 

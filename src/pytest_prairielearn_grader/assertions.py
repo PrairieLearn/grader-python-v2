@@ -21,22 +21,8 @@ import os
 from typing import Any
 
 from .fixture import _SandboxBase
-
-
-def _format_value(value: Any, *, max_len: int = 200) -> str:
-    """Return a repr of *value*, truncated for readability."""
-    text = repr(value)
-    if len(text) > max_len:
-        text = text[: max_len - 3] + "..."
-    return text
-
-
-def _format_call(func_name: str, args: tuple[Any, ...], kwargs: dict[str, Any] | None) -> str:
-    """Format ``func_name(args, kwargs)`` for display."""
-    parts: list[str] = [_format_value(a, max_len=60) for a in args]
-    if kwargs:
-        parts.extend(f"{k}={_format_value(v, max_len=60)}" for k, v in kwargs.items())
-    return f"{func_name}({', '.join(parts)})"
+from .utils import format_call
+from .utils import format_value
 
 
 def _build_failure_lines(
@@ -50,8 +36,8 @@ def _build_failure_lines(
     lines: list[str] = []
     if description:
         lines.append(f"Checking: {description}")
-    lines.append(f"Expected output: {_format_value(expected)}")
-    lines.append(f"Your code output: {_format_value(actual)}")
+    lines.append(f"Expected output: {format_value(expected)}")
+    lines.append(f"Your code output: {format_value(actual)}")
     if msg:
         lines.append(msg)
     else:
@@ -350,7 +336,7 @@ def assert_fn_equal(
     """
     call_kwargs = kwargs or {}
     actual = sandbox.query_function(func_name, *args, query_timeout=query_timeout, **call_kwargs)
-    call_description = description or _format_call(func_name, args, kwargs)
+    call_description = description or format_call(func_name, args, kwargs)
     assert_equal(actual, expected, msg=msg, description=call_description)
     return actual
 
@@ -380,6 +366,6 @@ def assert_fn_approx_equal(
     """
     call_kwargs = kwargs or {}
     actual = sandbox.query_function(func_name, *args, query_timeout=query_timeout, **call_kwargs)
-    call_description = description or _format_call(func_name, args, kwargs)
+    call_description = description or format_call(func_name, args, kwargs)
     assert_approx_equal(actual, expected, rtol=rtol, atol=atol, msg=msg, description=call_description)
     return actual
