@@ -398,4 +398,4 @@ def get_output_level_marker(marker: pytest.Mark | None, config_level: str | None
         except ValueError:
             pass
 
-    return GradingOutputLevel.ExceptionMessage
+    return GradingOutputLevel.Friendly

@@ -14,7 +14,7 @@ def ans(sandbox: StudentFixture):
 
 
 @pytest.mark.grading_data(name="Test with fixture exception", points=1)
-@pytest.mark.output("exception_message")
+@pytest.mark.output(level="message")
 def test_with_fixture_exception(sandbox: StudentFixture, ans) -> None:
     """
     This test uses a fixture that accesses student code.

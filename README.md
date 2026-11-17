@@ -34,28 +34,28 @@ Student code runs in a separate subprocess via Unix sockets, providing:
 
 ### Student-Friendly Feedback Mode
 
-Control how much information students see when their code fails. Use `@pytest.mark.output(level=...)` per test, or set `output_level` globally in your `ConfigObject`:
+Control how much information students see when their code fails. The default is `"friendly"`. Use `@pytest.mark.output(level=...)` per test, or set `output_level` globally in your `ConfigObject`:
 
 ```python
 from pytest_prairielearn_grader import ConfigObject
 
 autograder_config = ConfigObject(
-    output_level="friendly",  # Global default for all tests
+    output_level="traceback",  # Global default for all tests
 )
 ```
 
 **Output levels:**
 | Level | Shows |
 |-------|-------|
+| `"friendly"` | Only the exception message, with no class name *(default)*. If a call to a student function raised the error, this includes the traceback from the student's code. |
 | `"none"` | Exception class name only (e.g., `AssertionError`) |
-| `"message"` | Exception name + first line of message *(default)* |
+| `"message"` | Exception name + first line of message |
 | `"traceback"` | Full exception with traceback |
-| `"friendly"` | Only the exception message text — no class name, no traceback |
 
 Per-test markers override the global setting:
 
 ```python
-@pytest.mark.output(level="friendly")
+@pytest.mark.output(level="traceback")
 @pytest.mark.grading_data(name="Test add", points=5)
 def test_add(sandbox: StudentFixture) -> None:
     assert_fn_equal(sandbox, "add", args=(2, 3), expected=5)
@@ -68,7 +68,6 @@ Student-friendly assertion functions that produce clean, readable failure messag
 ```python
 from pytest_prairielearn_grader.assertions import assert_equal, assert_fn_equal
 
-@pytest.mark.output(level="friendly")
 @pytest.mark.grading_data(name="Test calculation", points=5)
 def test_calc(sandbox: StudentFixture) -> None:
     # Produces: "Checking: add(2, 3)\nExpected output: 5\nYour code output: 4\n..."

@@ -162,8 +162,6 @@ import pytest
 from pytest_prairielearn_grader.assertions import assert_approx_equal
 from pytest_prairielearn_grader.fixture import StudentFixture
 
-pytestmark = pytest.mark.output(level="friendly")
-
 
 @pytest.mark.grading_data(name="x_sq", points=10)
 def test_x_sq(sandbox: StudentFixture, data_json: dict) -> None:
@@ -234,9 +232,8 @@ The `plots` example question is a converted plot question.
 
 ### Feedback messages
 
-Use `@pytest.mark.output(level=GradingOutputLevel.Friendly)` on each test, as the example questions
-do, or `output_level="friendly"` in the `ConfigObject`. At this level the student sees only the
-assertion's message.
+The default `friendly` [output level](quick_start.md#output-levels) shows the student only the
+assertion's message, so tests don't need `@pytest.mark.output`.
 
 Follow [Hiding Expected Values](quick_start.md#hiding-expected-values): don't use a bare `assert`
 or numpy testing functions, and use `assert_true` for hidden test cases. The comparison helpers show

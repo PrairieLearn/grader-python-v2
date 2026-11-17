@@ -110,11 +110,8 @@ checks the result:
 
 ```python
 import pytest
-from pytest_prairielearn_grader import ConfigObject
 from pytest_prairielearn_grader.assertions import assert_fn_approx_equal
 from pytest_prairielearn_grader.fixture import StudentFixture
-
-autograder_config = ConfigObject(output_level="friendly")
 
 
 @pytest.mark.grading_data(name="Average of one number", points=1)
@@ -134,7 +131,8 @@ def test_several(sandbox: StudentFixture, values: list[float]) -> None:
   tolerance. On a failure, the student sees which call was checked, the expected value and their
   value. See [Checking Answers](#checking-answers) for the other helpers and for checks that hide the
   expected value.
-- The `friendly` output level shows students only the assertion's message, without a traceback.
+- Students see only the assertion's message, because `friendly` is the default
+  [output level](#output-levels).
 - Expected values are computed in the test. Don't put a reference solution in a file that student
   code can read.
 
@@ -474,17 +472,18 @@ shows both frames.
 
 The output level sets how much of a failure students see:
 
-| Level         | Shows to student                                              |
-| ------------- | ------------------------------------------------------------- |
-| `"none"`      | Exception class name only (e.g., `AssertionError`)            |
-| `"message"`   | Exception name + first line of message _(default when unset)_ |
-| `"traceback"` | Exception name + message + full traceback                     |
-| `"friendly"`  | Only the exception message text — no class name, no traceback |
+| Level         | Shows to student                                                                                                                                                          |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"friendly"`  | The exception message only, with no class name _(default)_. If a call to a student function raised the error, the message includes the traceback from the student's code. |
+| `"none"`      | Exception class name only (e.g., `AssertionError`)                                                                                                                        |
+| `"message"`   | Exception name + first line of message                                                                                                                                    |
+| `"traceback"` | Exception name + message + full traceback                                                                                                                                 |
 
-Use `"friendly"` with the assertion helpers. Set it on one test:
+The default, `"friendly"`, works well with the assertion helpers. To show more, such as the full
+traceback for advanced students, set a different level on one test:
 
 ```python
-@pytest.mark.output(level="friendly")
+@pytest.mark.output(level="traceback")
 @pytest.mark.grading_data(name="Test addition", points=5)
 def test_add(sandbox: StudentFixture) -> None:
     assert_fn_equal(sandbox, "add", args=(2, 3), expected=5)
@@ -493,18 +492,17 @@ def test_add(sandbox: StudentFixture) -> None:
 On every test in a file, with a module-level `pytestmark`:
 
 ```python
-pytestmark = pytest.mark.output(level="friendly")
+pytestmark = pytest.mark.output(level="traceback")
 ```
 
 Or in the `ConfigObject`:
 
 ```python
-autograder_config = ConfigObject(output_level="friendly")
+autograder_config = ConfigObject(output_level="traceback")
 ```
 
 With the `ConfigObject` approach, individual tests can still override it with
-`@pytest.mark.output(level="traceback")`. The `"message"` and `"traceback"` levels can help
-advanced students, who can learn from reading tracebacks.
+`@pytest.mark.output(level=...)`.
 
 ### Partial Credit and Feedback
 
@@ -901,7 +899,7 @@ All parameters are optional:
 | Parameter                  | Default                                            | Description                                                                                                                                |
 | -------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `sandbox_timeout`          | `1.0`                                              | Seconds allowed for starting the sandbox, which runs the setup code and student code. See [Timeout Configuration](#timeout-configuration). |
-| `output_level`             | `None`                                             | Default [output level](#output-levels) for every test.                                                                                     |
+| `output_level`             | `None`                                             | Default [output level](#output-levels) for every test. `None` means `"friendly"`.                                                          |
 | `names_for_user`           | `None`                                             | Variables to give student code. See [Giving Values to Student Code](#giving-values-to-student-code).                                       |
 | `starting_vars`            | `{}`                                               | Values for names in `names_for_user`.                                                                                                      |
 | `student_code_pattern`     | `"student_code*.py"`                               | Glob pattern for the student's file.                                                                                                       |
@@ -1955,8 +1953,8 @@ To see more examples of what is possible in these test files, look at the test c
 
 1. **Keep code in the tests**: See [Where Code Belongs](#where-code-belongs).
 2. **Use descriptive test names**: The `name` in `@pytest.mark.grading_data` is shown to students.
-3. **Use friendly messages that don't give away answers**: Use the assertion helpers with the
-   `friendly` output level, and `assert_true` for hidden test cases.
+3. **Use friendly messages that don't give away answers**: Use the assertion helpers, and
+   `assert_true` for hidden test cases.
 4. **Test incrementally**: Break complex problems into smaller tests with partial credit.
 5. **Prefer `parametrize`**: Use `@pytest.mark.parametrize` for several inputs instead of a loop,
    unless the inputs share partial credit.
