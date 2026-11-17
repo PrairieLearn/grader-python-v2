@@ -195,3 +195,34 @@ def test_timeout_stops_later_tests_on_module_sandbox(pytester: pytest.Pytester) 
     assert results["first"]["message"] == "double(4) timed out after 0.2 seconds."
     assert results["second"]["message"] == "This check didn't run because double(4) timed out after 0.2 seconds."
     assert results["second"]["points_frac"] == 0
+
+
+def test_timeout_reported_by_student_process_stops_sandbox(pytester: pytest.Pytester) -> None:
+    # The socket waits a second longer than the call's timeout, so the student process's own
+    # timeout reply always arrives first.
+    result = run_grader(
+        pytester,
+        """
+        class SlowSocket:
+            def __init__(self, sock):
+                self.sock = sock
+
+            def settimeout(self, timeout):
+                self.sock.settimeout(timeout + 1)
+
+            def __getattr__(self, name):
+                return getattr(self.sock, name)
+
+
+        @pytest.mark.grading_data(name="case", points=1)
+        def test_case(sandbox, subtests, monkeypatch):
+            monkeypatch.setattr(sandbox, "student_socket", SlowSocket(sandbox.student_socket))
+            for x in [1, 4, 2, 5]:
+                with subtests.test():
+                    assert_fn_equal(sandbox, "double", args=(x,), expected=2 * x, query_timeout=0.2)
+        """,
+    )["case"]
+
+    assert result["points_frac"] == pytest.approx(0.25)
+    assert "double(4) timed out after 0.2 seconds." in result["message"]
+    assert "The remaining 2 checks didn't run because double(4) timed out after 0.2 seconds." in result["message"]
