@@ -959,6 +959,12 @@ def pytest_runtest_setup(item):
                 raise ValueError(f"benchmark mark can't have {name!r} keyword argument.")
 
 
+def _import_mode_was_chosen(config: Config) -> bool:
+    """Whether the user passed --import-mode, on the command line, in addopts or in PYTEST_ADDOPTS."""
+    args = [*config.invocation_params.args, *config.getini("addopts"), *os.environ.get("PYTEST_ADDOPTS", "").split()]
+    return any(arg == "--import-mode" or arg.startswith("--import-mode=") for arg in args)
+
+
 @pytest.hookimpl(trylast=True)  # force the other plugins to initialise, fixes issue with capture not being properly initialized
 def pytest_configure(config: Config) -> None:
     # config.addinivalue_line("markers", "benchmark: mark a test with custom benchmark settings.")
@@ -969,6 +975,12 @@ def pytest_configure(config: Config) -> None:
     # Add a marker for the sandbox fixture to set the initialization timeout
     config.addinivalue_line("markers", "sandbox_timeout(timeout_value): sets a timeout for initialization of the sandbox fixture")
     config.addinivalue_line("markers", "output(level): controls the detail level of grading failure output")
+
+    # Every question's tests are in a file named test_student.py. pytest's default import mode
+    # imports each one as the module `test_student`, so a run over several questions stops with an
+    # "import file mismatch" error. The importlib mode names each module by its path instead.
+    if not _import_mode_was_chosen(config):
+        config.option.importmode = "importlib"
 
     # Only register our plugin if it hasn't been already (e.g., in case of multiple conftests)
     if not hasattr(config, "result_collector_plugin"):
