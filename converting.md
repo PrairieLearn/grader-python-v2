@@ -44,9 +44,6 @@ those submissions when they're regraded.
 Read every file in the question, including `info.json`, `question.html`, `server.py` and everything in
 `tests/`. Stop and report back instead of converting if the question needs one of these:
 
-- **Course libraries.** `externalGradingOptions.serverFilesCourse` or imports of course-wide
-  modules. The legacy grader put `/grade/serverFilesCourse` on the import path, and this grader
-  doesn't.
 - **A custom grader image** or an `entrypoint` in `externalGradingOptions`.
 - **Values the sandbox can't send back.** Tests can only receive values that can be serialized:
   numbers, strings, `None`, lists, dicts, numpy arrays and scalars, pandas DataFrames and matplotlib
@@ -368,6 +365,9 @@ These differences from the legacy grader are easy to miss:
 - **Default import blacklist.** `os`, `sys`, `subprocess`, `pathlib` and `shutil` are blocked unless
   you set `import_blacklist`.
 - **Syntax errors** make the submission ungradable instead of scoring 0.
+- **Course libraries** from `externalGradingOptions.serverFilesCourse` are still on the import path.
+  If you set `import_whitelist`, list them in it. See
+  [Course Modules](quick_start.md#course-modules).
 
 ## 7. Test the conversion
 
