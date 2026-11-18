@@ -1008,6 +1008,29 @@ import helper_function as hf
 > setting also doesn't make the rest of the tests folder private. `importlib` isn't blacklisted by
 > default, so student code can load files in that folder by path.
 
+#### Course Modules
+
+To share a module between questions, put it in the course's `serverFilesCourse` folder and list it
+in the question's `info.json`:
+
+```json
+"externalGradingOptions": {
+  "image": "prairielearn/grader-python-pytest:latest",
+  "serverFilesCourse": ["course_lib.py"]
+}
+```
+
+PrairieLearn copies it to `/grade/serverFilesCourse`, which the grader images put on the import
+path, as the legacy grader did. Tests, setup code and student code can then `import course_lib`.
+
+- **Import restrictions:** if you set `import_whitelist`, list the module in it so that setup code
+  and student code can import it. Tests aren't restricted.
+- **Ordinary modules:** unlike [helper modules](#helper-modules), these load like any installed
+  library, without the sandbox's restricted builtins.
+- **Testing locally:** add the folder to `PYTHONPATH` when you run pytest.
+
+> **Warning:** Student code can import these modules too, so they must not contain answers.
+
 #### Data Files
 
 In a workspace, code such as `np.loadtxt("pagerank_large.txt")` reads a file next to the notebook. To
