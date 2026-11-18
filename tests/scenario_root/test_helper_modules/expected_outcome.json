@@ -1,0 +1,101 @@
+{
+  "expected_data_object": {
+    "score": 1.0,
+    "tests": [
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "setup code",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules.py::test_setup_code[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "query",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules.py::test_query[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "query_function",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules.py::test_query_function[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "module_sandbox",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules.py::test_module_sandbox[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "one copy of each module",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules.py::test_one_copy[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "helper modules can import each other",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules.py::test_second_helper[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "modules that aren't named can't be imported",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules.py::test_not_named[student_code-import_ans]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "modules that aren't named can't be imported",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules.py::test_not_named[student_code-import_setup_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "modules that aren't named can't be imported",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules.py::test_not_named[student_code-import_scenario]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "modules that aren't named can't be imported",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules.py::test_not_named[student_code-helper_imports_ans]"
+      }
+    ]
+  },
+  "expected_outcome": {
+    "passed": 11,
+    "failed": 0
+  }
+}

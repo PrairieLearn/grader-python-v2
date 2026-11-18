@@ -1,0 +1,65 @@
+{
+  "expected_data_object": {
+    "score": 1.0,
+    "tests": [
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "helper module isn't whitelisted",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules_restricted.py::test_helper_module[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "whitelist still applies",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules_restricted.py::test_whitelist[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "blacklist still applies",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules_restricted.py::test_blacklist[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "whitelisted file in the folder isn't importable",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules_restricted.py::test_whitelisted_file[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "helper module's imports follow the rules",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules_restricted.py::test_helper_import_rules[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "helper module's builtins follow the rules",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_helper_modules_restricted.py::test_helper_builtin_rules[student_code]"
+      }
+    ]
+  },
+  "expected_outcome": {
+    "passed": 6,
+    "failed": 0
+  }
+}

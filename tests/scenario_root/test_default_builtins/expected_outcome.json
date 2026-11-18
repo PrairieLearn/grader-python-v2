@@ -1,0 +1,34 @@
+{
+  "expected_data_object": {
+    "score": 1.0,
+    "tests": [
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "common builtins",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_default_builtins.py::test_common_builtins[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "classes",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_default_builtins.py::test_classes[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "dangerous builtins stay blocked",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_default_builtins.py::test_open_blocked[student_code]"
+      }
+    ]
+  }
+}

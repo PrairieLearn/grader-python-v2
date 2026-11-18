@@ -1,12 +1,15 @@
 import json
 import logging
+import math
 import os
 import sys
 from collections.abc import Iterable
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from typing import Literal
 from typing import NamedTuple
 from typing import cast
 
@@ -15,10 +18,12 @@ import _pytest.reports
 import _pytest.terminal
 import pytest
 from _pytest.config import Config
+from _pytest.outcomes import Failed
 from prettytable import PrettyTable
 
 from .config import ConfigObject
 from .fixture import FeedbackFixture
+from .fixture import SandboxStopped
 from .fixture import StudentFiles
 from .fixture import StudentFixture
 from .fixture import WorkspaceFixture
@@ -32,6 +37,21 @@ logger = logging.getLogger(__name__)
 # Default configuration constants
 DEFAULT_SANDBOX_TIMEOUT = 1.0
 DEFAULT_IMPORT_BLACKLIST = ["os", "sys", "subprocess", "pathlib", "shutil"]
+# Failing subtests shown in a test's message. The rest are only counted, to keep the message readable.
+MAX_SHOWN_SUBTEST_FAILURES = 5
+
+
+class SandboxStartupFailed(Failed):
+    """
+    Raised when the student code sandbox fails to start (an exception, timeout or no response
+    while running student code at startup).
+
+    The message is already formatted for the test's output level, so the result collector
+    shows it to the student as it is instead of wrapping it in another exception header.
+    """
+
+    def __init__(self, msg: str | None = None, pytrace: bool = False) -> None:
+        super().__init__(msg, pytrace)
 
 
 class TestResult(NamedTuple):
@@ -42,9 +62,118 @@ class TestResult(NamedTuple):
     stdout: str
 
 
-def get_datadir(test_module: ModuleType) -> Path | None:
+@dataclass(frozen=True, slots=True)
+class SubtestResult:
+    """The result of one `subtests.test()` block in a test."""
+
+    label: str | None
+    outcome: str
+    excinfo: pytest.ExceptionInfo[BaseException] | None
+    # The `weight` keyword argument. Newer pytest versions keep its repr, such as "2", instead.
+    weight: object = None
+
+
+def get_subtest_weights(subtests: list[SubtestResult]) -> list[float]:
     """
-    Get the data directory for the current test module.
+    Each subtest's weight from `subtests.test(weight=...)`, or 1 without one. Raises ValueError,
+    with a message for the instructor, if a weight isn't a non-negative number or they're all 0.
+    """
+    weights = []
+    for subtest in subtests:
+        if subtest.weight is None:
+            weights.append(1.0)
+            continue
+        weight = math.nan
+        if isinstance(subtest.weight, int | float | str) and not isinstance(subtest.weight, bool):
+            try:
+                weight = float(subtest.weight)
+            except ValueError:
+                pass
+        if not math.isfinite(weight) or weight < 0:
+            raise ValueError(f"A subtest's weight must be a non-negative int or float, not {subtest.weight}.")
+        weights.append(weight)
+    if sum(weights) == 0:
+        raise ValueError("At least one subtest needs a weight greater than 0.")
+    return weights
+
+
+def format_failure(
+    excinfo: pytest.ExceptionInfo[BaseException], output_level: GradingOutputLevel, when: Literal["setup", "call", "teardown"]
+) -> str:
+    """Format the exception that failed a test, or one of its subtests, for the test's output level."""
+    if isinstance(excinfo.value, SandboxStartupFailed):
+        # The sandbox startup handler already formatted this message for the
+        # output level, so show it in full without another exception header.
+        return str(excinfo.value)
+
+    if output_level == GradingOutputLevel.Friendly:
+        # Friendly mode: show only the exception message text with
+        # no exception class name, traceback, or "failed with" prefix.
+        return str(excinfo.value)
+
+    # Customize the message based on the failure phase
+    if when == "setup":
+        phase_message = "Student code execution failed with an exception"
+    elif when == "teardown":
+        phase_message = "Student code teardown failed with an exception"
+    else:
+        phase_message = "Student code grading failed with an exception"
+
+    if output_level == GradingOutputLevel.ExceptionName:
+        return f"{phase_message}: {excinfo.type.__name__}"
+
+    if output_level == GradingOutputLevel.ExceptionMessage:
+        # TODO make this work with multiline messages somehow?
+        exception_message = str(excinfo.value).split(os.linesep)[0]
+        return f"{phase_message}: {excinfo.type.__name__}{os.linesep}Exception Message: {exception_message}"
+
+    # If showing more than the exception name, show the message + full traceback
+    return str(excinfo.getrepr(style="no"))
+
+
+def format_subtest_results(subtests: list[SubtestResult], output_level: GradingOutputLevel) -> str:
+    """
+    Summarize a test's subtests: how many passed, the first few failures, and the checks that
+    didn't run because the sandbox stopped after a timeout.
+    """
+    passed = sum(subtest.outcome == "passed" for subtest in subtests)
+    blocks = [f"{passed}/{len(subtests)} checks passed."]
+
+    stopped: list[SandboxStopped] = []
+    shown: list[SubtestResult] = []
+    for subtest in subtests:
+        if subtest.excinfo is not None and isinstance(subtest.excinfo.value, SandboxStopped):
+            stopped.append(subtest.excinfo.value)
+        elif subtest.outcome != "passed":
+            shown.append(subtest)
+
+    for subtest in shown[:MAX_SHOWN_SUBTEST_FAILURES]:
+        message = format_failure(subtest.excinfo, output_level, "call") if subtest.excinfo is not None else subtest.outcome
+        if subtest.label is None:
+            blocks.append(message)
+        elif "\n" in message:
+            blocks.append(f"{subtest.label}:{os.linesep}{message}")
+        else:
+            blocks.append(f"{subtest.label}: {message}")
+
+    if len(shown) > MAX_SHOWN_SUBTEST_FAILURES:
+        hidden = len(shown) - MAX_SHOWN_SUBTEST_FAILURES
+        blocks.append(f"...and {hidden} more {'check' if hidden == 1 else 'checks'} failed.")
+
+    if stopped:
+        remaining = "The remaining check" if len(stopped) == 1 else f"The remaining {len(stopped)} checks"
+        blocks.append(f"{remaining} didn't run because {stopped[0].timed_out_call}.")
+
+    return (os.linesep * 2).join(blocks)
+
+
+def get_tests_dir(test_module: ModuleType) -> Path | None:
+    """
+    Get the tests folder for a test module: the folder named after the module, next to it.
+
+    For /grade/run/test_student.py that's /grade/run/test_student/, which holds the question's
+    tests files (leading_code.py, helper modules, data files) and the student/ folder.
+    The tests_dir fixture exposes this to tests.
     """
 
     if test_module is None:
@@ -61,10 +190,7 @@ def get_datadir(test_module: ModuleType) -> Path | None:
     # Convert it to a pathlib.Path object for easier manipulation
     module_path = Path(module_filepath_str)
 
-    # Let's assume you have a 'data' directory next to your test file
-    data_dir = module_path.parent / module_path.stem
-
-    return data_dir
+    return module_path.parent / module_path.stem
 
 
 def _find_data_json(request: pytest.FixtureRequest) -> Path | None:
@@ -73,8 +199,8 @@ def _find_data_json(request: pytest.FixtureRequest) -> Path | None:
     if data_json_path is not None and Path(data_json_path).is_file():
         return Path(data_json_path)
 
-    datadir = get_datadir(request.module)
-    return None if datadir is None else datadir / "data.json"
+    tests_dir = get_tests_dir(request.module)
+    return None if tests_dir is None else tests_dir / "data.json"
 
 
 @pytest.fixture(scope="module")
@@ -92,29 +218,109 @@ def data_json(request: pytest.FixtureRequest) -> dict[str, Any] | None:
     except (OSError, ValueError) as e:
         raise RuntimeError(f"Could not load data.json: {e}") from e
 
-    # if datadir is None or not datadir.is_dir():
-    #     raise ValueError(f"Data directory '{datadir}' not found or is not a directory.")
+    # if tests_dir is None or not tests_dir.is_dir():
+    #     raise ValueError(f"Tests folder '{tests_dir}' not found or is not a directory.")
 
     # if not data_file.is_file():
-    #     raise ValueError(f"Data file '{data_file.name}' not found in '{datadir}'.")
+    #     raise ValueError(f"Data file '{data_file.name}' not found in '{tests_dir}'.")
 
 
-def _initialize_sandbox_fixture(
+def _load_helper_modules(
+    request: pytest.FixtureRequest,
+    names: list[str] | None,
+    import_blacklist: list[str] | None,
+) -> dict[str, str] | None:
+    """
+    Read the source of each module named by the helper_modules setting.
+
+    A problem with these files is the instructor's to fix, so it makes the submission ungradable
+    instead of costing the student an attempt.
+    """
+    if names is None:
+        return None
+
+    tests_dir = get_tests_dir(request.module)
+    sources: dict[str, str] = {}
+    for name in names:
+        path = None if tests_dir is None else tests_dir / f"{name}.py"
+        try:
+            if import_blacklist is not None and name in import_blacklist:
+                raise ValueError("it's also in import_blacklist, so it can't be imported")
+            if path is None or not path.is_file():
+                raise FileNotFoundError(f"{path} doesn't exist")
+            sources[name] = path.read_text(encoding="utf-8")
+            compile(sources[name], f"{name}.py", "exec")
+        except (OSError, ValueError, SyntaxError) as e:
+            message = f"Autograder configuration error in helper_modules: can't use '{name}': {e}"
+            request.config.result_collector_plugin.collection_errors.append(message)  # type: ignore[attr-defined]
+            raise SandboxStartupFailed(message) from e
+    return sources
+
+
+def _resolve_data_files(request: pytest.FixtureRequest, names: list[str] | None) -> dict[str, Path] | None:
+    """
+    Find each file named by the data_files setting in the tests folder.
+
+    A missing file is the instructor's to fix, so it makes the submission ungradable instead of
+    costing the student an attempt.
+    """
+    if names is None:
+        return None
+
+    tests_dir = get_tests_dir(request.module)
+    paths: dict[str, Path] = {}
+    for name in names:
+        path = None if tests_dir is None else tests_dir / name
+        if path is None or not path.is_file():
+            message = f"Autograder configuration error in data_files: can't use '{name}': {path} doesn't exist"
+            request.config.result_collector_plugin.collection_errors.append(message)  # type: ignore[attr-defined]
+            raise SandboxStartupFailed(message)
+        paths[name] = path
+    return paths
+
+
+@pytest.fixture(scope="module")
+def tests_dir(request: pytest.FixtureRequest) -> Path:
+    """
+    The question's tests folder, which holds leading_code.py, helper modules and data files.
+
+    Tests can read instructor files from it, for example to compute expected values from the
+    same data file that data_files gives the student: ``np.loadtxt(tests_dir / "data.txt")``.
+    """
+    path = get_tests_dir(request.module)
+    if path is None:
+        pytest.fail("tests_dir: the test module has no file, so its tests folder can't be found", pytrace=False)
+    return path
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolvedSandboxConfig:
+    """The configuration shared by the student and workspace fixtures, resolved once per fixture."""
+
+    initialization_timeout: float
+    import_whitelist: list[str] | None
+    import_blacklist: list[str] | None
+    builtin_whitelist: list[str] | None
+    starting_vars: dict[str, Any]
+    names_for_user_list: list[str] | None
+    helper_module_names: list[str] | None
+    data_file_names: list[str] | None
+    # The module-level ConfigObject, kept so each fixture can read its own extra fields
+    # (notebook_cell_tag for the student fixture, workspace_exec_entry for the workspace one).
+    config_object: ConfigObject | None
+
+
+def _resolve_sandbox_config(
     request: pytest.FixtureRequest,
     data_json: dict[str, Any] | None,
-    file_names: StudentFiles,
-) -> tuple[StudentFixture, float]:
+) -> _ResolvedSandboxConfig:
     """
-    Common initialization logic for both sandbox and module_sandbox fixtures.
-    Handles parameter parsing, timeout configuration, and StudentFixture creation.
-    Returns the fixture and the initialization timeout.
+    Resolve the configuration common to the sandbox, module_sandbox and workspace_sandbox fixtures.
 
-    Args:
-        request: The pytest fixture request
-        data_json: Data loaded from data.json file
-        file_names: StudentFiles namedtuple with file paths
+    Reads params from data.json and the module-level ConfigObject (or module-level timeout/mark
+    when there's no ConfigObject), merges them with the ConfigObject taking precedence, and injects
+    the names_for_user values into starting_vars.
     """
-    # Default timeout TODO make this a command line option?
     initialization_timeout: float = DEFAULT_SANDBOX_TIMEOUT
 
     if data_json is None:
@@ -126,7 +332,9 @@ def _initialize_sandbox_fixture(
 
     # Check for module-level ConfigObject that overrides all other configuration
     config_dict: dict[str, Any] = {}
-    notebook_cell_tag: str | None = None
+    config_object: ConfigObject | None = None
+    helper_module_names: list[str] | None = None
+    data_file_names: list[str] | None = None
     if hasattr(request, "module") and hasattr(request.module, "autograder_config"):
         config_object = request.module.autograder_config
         if not isinstance(config_object, ConfigObject):
@@ -136,7 +344,8 @@ def _initialize_sandbox_fixture(
         # Handle timeout and starting_vars separately as they're not in to_dict()
         initialization_timeout = config_object.sandbox_timeout
         config_starting_vars = config_object.starting_vars
-        notebook_cell_tag = config_object.notebook_cell_tag
+        helper_module_names = config_object.helper_modules
+        data_file_names = config_object.data_files
     else:
         # Check for module-level timeout variable (works for module-scoped fixtures)
         # This allows setting: sandbox_timeout = 0.5 at module level
@@ -170,13 +379,13 @@ def _initialize_sandbox_fixture(
     # TODO make sure this contains only valid builtins
     builtin_whitelist = merged_params.get("builtin_whitelist")
 
+    logger.debug(f"Import restrictions - whitelist: {import_whitelist}, blacklist: {import_blacklist}")
+
     # Merge starting_vars: __data_params always present, then config_starting_vars
     starting_vars: dict[str, Any] = {
         "__data_params": deepcopy(params_dict) if data_json is not None else {},
         **config_starting_vars,
     }
-
-    logger.debug(f"Import restrictions - whitelist: {import_whitelist}, blacklist: {import_blacklist}")
 
     # Process names_for_user_list to inject variables from params_dict or starting_vars
     if names_for_user_list is not None:
@@ -189,18 +398,45 @@ def _initialize_sandbox_fixture(
 
             starting_vars[name] = value
 
-    fixture = StudentFixture(
-        file_names=file_names,
+    return _ResolvedSandboxConfig(
+        initialization_timeout=initialization_timeout,
         import_whitelist=import_whitelist,
         import_blacklist=import_blacklist,
-        starting_vars=starting_vars,
         builtin_whitelist=builtin_whitelist,
+        starting_vars=starting_vars,
         names_for_user_list=names_for_user_list,
-        worker_username=request.config.getoption("--worker-username"),
-        notebook_cell_tag=notebook_cell_tag,
+        helper_module_names=helper_module_names,
+        data_file_names=data_file_names,
+        config_object=config_object,
     )
 
-    return fixture, initialization_timeout
+
+def _initialize_sandbox_fixture(
+    request: pytest.FixtureRequest,
+    data_json: dict[str, Any] | None,
+    file_names: StudentFiles,
+) -> tuple[StudentFixture, float]:
+    """
+    Common initialization logic for both sandbox and module_sandbox fixtures.
+    Returns the StudentFixture and the initialization timeout.
+    """
+    config = _resolve_sandbox_config(request, data_json)
+    notebook_cell_tag = config.config_object.notebook_cell_tag if config.config_object is not None else None
+
+    fixture = StudentFixture(
+        file_names=file_names,
+        import_whitelist=config.import_whitelist,
+        import_blacklist=config.import_blacklist,
+        starting_vars=config.starting_vars,
+        builtin_whitelist=config.builtin_whitelist,
+        names_for_user_list=config.names_for_user_list,
+        worker_username=request.config.getoption("--worker-username"),
+        notebook_cell_tag=notebook_cell_tag,
+        helper_modules=_load_helper_modules(request, config.helper_module_names, config.import_blacklist),
+        data_files=_resolve_data_files(request, config.data_file_names),
+    )
+
+    return fixture, config.initialization_timeout
 
 
 def _get_config_output_level(module: ModuleType | None) -> str | None:
@@ -242,29 +478,33 @@ def _handle_sandbox_startup_errors(
         if exception_name == "SyntaxError":
             _record_syntax_error_as_ungradable(request, response)
 
+        exception_message = response.get("execution_message", "") or ""
+
         if output_level == GradingOutputLevel.Friendly:
-            exception_message = response.get("execution_message", "") or ""
-            pytest.fail(exception_message or str(exception_name), pytrace=False)
+            raise SandboxStartupFailed(exception_message or str(exception_name))
 
         fail_message = f"Student code execution failed with an exception: {exception_name}"
-        exception_message = response.get("execution_message", "") or ""
+
+        if output_level == GradingOutputLevel.ExceptionName:
+            raise SandboxStartupFailed(fail_message)
+
         fail_message += f"{os.linesep}Exception Message: {exception_message}"
 
         if output_level == GradingOutputLevel.ExceptionMessage:
-            pytest.fail(fail_message, pytrace=False)
+            raise SandboxStartupFailed(fail_message)
 
         assert output_level == GradingOutputLevel.FullTraceback
 
         if exception_traceback := response.get("execution_traceback", ""):
             fail_message += f"{os.linesep * 2}{exception_traceback}"
 
-        pytest.fail(fail_message, pytrace=False)
+        raise SandboxStartupFailed(fail_message)
 
     elif response_status == ProcessStatusCode.TIMEOUT:
-        pytest.fail("Student code initialization timed out", pytrace=False)
+        raise SandboxStartupFailed("Student code initialization timed out")
 
     elif response_status == ProcessStatusCode.NO_RESPONSE:
-        pytest.fail(f"No response from initialization with timeout {initialization_timeout}", pytrace=False)
+        raise SandboxStartupFailed(f"No response from initialization with timeout {initialization_timeout}")
 
     elif response_status != ProcessStatusCode.SUCCESS:
         logger.warning(f"Unexpected status in response from student code server: {response}")
@@ -361,10 +601,10 @@ def sandbox(request: pytest.FixtureRequest, data_json: dict[str, Any] | None) ->
 def _find_student_files(module: ModuleType) -> list[StudentFiles]:
     """
     Find all student code files for a module and return StudentFiles objects.
-    Returns empty list if no data directory or no matching files found.
+    Returns empty list if no tests folder or no matching files found.
     """
-    data_dir = get_datadir(module)
-    if data_dir is None or not data_dir.is_dir():
+    tests_dir = get_tests_dir(module)
+    if tests_dir is None or not tests_dir.is_dir():
         return []
 
     # Check for ConfigObject first, then module-level pattern, then default
@@ -372,18 +612,18 @@ def _find_student_files(module: ModuleType) -> list[StudentFiles]:
         student_code_pattern = module.autograder_config.student_code_pattern
     else:
         student_code_pattern = getattr(module, "student_code_pattern", "student_code*.py")
-    logger.debug(f"Looking for student code files in {data_dir} with pattern '{student_code_pattern}'")
+    logger.debug(f"Looking for student code files in {tests_dir} with pattern '{student_code_pattern}'")
 
     # Set up file paths
-    leading_file = data_dir / "leading_code.py"
-    trailing_file = data_dir / "trailing_code.py"
-    setup_code_file = data_dir / "setup_code.py"
+    leading_file = tests_dir / "leading_code.py"
+    trailing_file = tests_dir / "trailing_code.py"
+    setup_code_file = tests_dir / "setup_code.py"
 
-    student_code_files = list(data_dir.glob(student_code_pattern))
+    student_code_files = list(tests_dir.glob(student_code_pattern))
     # Fall back to student/ subdirectory — matches the production Docker layout where
     # run.sh moves /grade/student → test_student/student/ as a whole directory.
     if not student_code_files:
-        student_subdir = data_dir / "student"
+        student_subdir = tests_dir / "student"
         if student_subdir.is_dir():
             student_code_files = list(student_subdir.glob(student_code_pattern))
     logger.debug(f"Found {len(student_code_files)} student code file(s): {[f.name for f in student_code_files]}")
@@ -398,8 +638,8 @@ def _find_workspace_dir(module: ModuleType) -> Path | None:
     Resolution order:
     1. ``autograder_config.workspace_student_dir`` if set as an absolute path.
     2. ``autograder_config.workspace_student_dir`` resolved relative to the
-       module's data directory (``<parent>/<stem>/``). if set as a relative path.
-    3. A sub-directory named ``"student"`` inside the module's data directory
+       module's tests folder (``<parent>/<stem>/``). if set as a relative path.
+    3. A sub-directory named ``"student"`` inside the module's tests folder
        (mirrors the ``/grade/student`` directory provided by PrairieLearn and
        the layout created by the pytester-based test runner).
     4. A sub-directory named ``"student"`` in the same directory as the test
@@ -413,10 +653,10 @@ def _find_workspace_dir(module: ModuleType) -> Path | None:
         p = Path(config_workspace_dir)
         if p.is_absolute():
             return p if p.is_dir() else None
-        # Relative path: try resolving from data_dir first, then module parent
-        data_dir = get_datadir(module)
-        if data_dir is not None:
-            resolved = data_dir / p
+        # Relative path: try resolving from tests_dir first, then module parent
+        tests_dir = get_tests_dir(module)
+        if tests_dir is not None:
+            resolved = tests_dir / p
             if resolved.is_dir():
                 return resolved
         module_file = getattr(module, "__file__", None)
@@ -430,9 +670,9 @@ def _find_workspace_dir(module: ModuleType) -> Path | None:
     # Check the data subdir first (matches the pytester layout used by the automated
     # scenario runner), then fall back to the module's own parent directory (the
     # natural layout when running a test file directly from its source location).
-    data_dir = get_datadir(module)
-    if data_dir is not None and data_dir.is_dir():
-        candidate = data_dir / "student"
+    tests_dir = get_tests_dir(module)
+    if tests_dir is not None and tests_dir.is_dir():
+        candidate = tests_dir / "student"
         if candidate.is_dir():
             return candidate
 
@@ -451,67 +691,27 @@ def _initialize_workspace_fixture(
     workspace_dir: Path,
 ) -> tuple[WorkspaceFixture, float]:
     """Initialise a WorkspaceFixture analogously to _initialize_sandbox_fixture."""
-    initialization_timeout: float = DEFAULT_SANDBOX_TIMEOUT
+    config = _resolve_sandbox_config(request, data_json)
+    exec_entry = config.config_object.workspace_exec_entry if config.config_object is not None else None
 
-    params_dict = data_json.get("params", {}) if data_json is not None else {}
-
-    config_dict: dict[str, Any] = {}
-    exec_entry: str | None = None
-    if hasattr(request, "module") and hasattr(request.module, "autograder_config"):
-        config_object = request.module.autograder_config
-        if not isinstance(config_object, ConfigObject):
-            pytest.fail(f"autograder_config must be a ConfigObject instance, got {type(config_object).__name__}")
-        config_dict = config_object.to_dict()
-        initialization_timeout = config_object.sandbox_timeout
-        config_starting_vars = config_object.starting_vars
-        exec_entry = config_object.workspace_exec_entry
-    else:
-        if hasattr(request, "module") and hasattr(request.module, "sandbox_timeout"):
-            initialization_timeout = request.module.sandbox_timeout
-        marker = request.node.get_closest_marker("sandbox_timeout")
-        if marker and marker.args:
-            initialization_timeout = marker.args[0]
-        config_starting_vars = {}
-
-    names_for_user_list: list[str] | None = None
-    if "names_for_user" in config_dict:
-        names_for_user_list = config_dict["names_for_user"]
-    elif "names_for_user" in params_dict:
-        names_for_user_list = [item["name"] for item in params_dict["names_for_user"]]
-
-    merged_params = {**params_dict, **config_dict}
-    import_whitelist = merged_params.get("import_whitelist")
-    import_blacklist = merged_params.get("import_blacklist", DEFAULT_IMPORT_BLACKLIST)
-    builtin_whitelist = merged_params.get("builtin_whitelist")
-
-    starting_vars: dict[str, Any] = {
-        "__data_params": deepcopy(params_dict) if data_json is not None else {},
-        **config_starting_vars,
-    }
-    if names_for_user_list is not None:
-        for name in names_for_user_list:
-            if name in starting_vars and name != "__data_params":
-                value = starting_vars[name]
-            else:
-                value = params_dict.get(name, None)
-            starting_vars[name] = value
-
-    # Resolve setup_code_file from the test module's data directory
-    data_dir = get_datadir(request.module)
-    setup_code_file = (data_dir / "setup_code.py") if data_dir is not None else Path("setup_code.py")
+    # Resolve setup_code_file from the test module's tests folder
+    tests_dir = get_tests_dir(request.module)
+    setup_code_file = (tests_dir / "setup_code.py") if tests_dir is not None else Path("setup_code.py")
 
     fixture = WorkspaceFixture(
         workspace_dir=workspace_dir,
         setup_code_file=setup_code_file,
-        import_whitelist=import_whitelist,
-        import_blacklist=import_blacklist,
-        starting_vars=starting_vars,
-        builtin_whitelist=builtin_whitelist,
-        names_for_user_list=names_for_user_list,
+        import_whitelist=config.import_whitelist,
+        import_blacklist=config.import_blacklist,
+        starting_vars=config.starting_vars,
+        builtin_whitelist=config.builtin_whitelist,
+        names_for_user_list=config.names_for_user_list,
         worker_username=request.config.getoption("--worker-username"),
         exec_entry=exec_entry,
+        helper_modules=_load_helper_modules(request, config.helper_module_names, config.import_blacklist),
+        data_files=_resolve_data_files(request, config.data_file_names),
     )
-    return fixture, initialization_timeout
+    return fixture, config.initialization_timeout
 
 
 @pytest.fixture
@@ -749,6 +949,12 @@ def pytest_runtest_setup(item):
                 raise ValueError(f"benchmark mark can't have {name!r} keyword argument.")
 
 
+def _import_mode_was_chosen(config: Config) -> bool:
+    """Whether the user passed --import-mode, on the command line, in addopts or in PYTEST_ADDOPTS."""
+    args = [*config.invocation_params.args, *config.getini("addopts"), *os.environ.get("PYTEST_ADDOPTS", "").split()]
+    return any(arg == "--import-mode" or arg.startswith("--import-mode=") for arg in args)
+
+
 @pytest.hookimpl(trylast=True)  # force the other plugins to initialise, fixes issue with capture not being properly initialized
 def pytest_configure(config: Config) -> None:
     # config.addinivalue_line("markers", "benchmark: mark a test with custom benchmark settings.")
@@ -760,6 +966,12 @@ def pytest_configure(config: Config) -> None:
     config.addinivalue_line("markers", "sandbox_timeout(timeout_value): sets a timeout for initialization of the sandbox fixture")
     config.addinivalue_line("markers", "output(level): controls the detail level of grading failure output")
 
+    # Every question's tests are in a file named test_student.py. pytest's default import mode
+    # imports each one as the module `test_student`, so a run over several questions stops with an
+    # "import file mismatch" error. The importlib mode names each module by its path instead.
+    if not _import_mode_was_chosen(config):
+        config.option.importmode = "importlib"
+
     # Only register our plugin if it hasn't been already (e.g., in case of multiple conftests)
     if not hasattr(config, "result_collector_plugin"):
         config.result_collector_plugin = ResultCollectorPlugin()  # type: ignore[attr-defined]
@@ -768,6 +980,10 @@ def pytest_configure(config: Config) -> None:
 
 class ResultCollectorPlugin:
     collected_results: dict[str, TestResult]
+    # The call result made for each test and each of its subtests, waiting for
+    # pytest_runtest_logreport to say which one it was.
+    pending_calls: dict[str, TestResult]
+    subtest_results: dict[str, list[SubtestResult]]
     student_feedback_data: dict[str, FeedbackFixture]
     grading_data: dict[str, Any]
     module_sandbox_cache: dict[tuple[str, str], StudentFixture]
@@ -777,6 +993,8 @@ class ResultCollectorPlugin:
 
     def __init__(self) -> None:
         self.collected_results = {}
+        self.pending_calls = {}
+        self.subtest_results = {}
         self.student_feedback_data = {}
         self.grading_data = {}
         self.module_sandbox_cache = {}
@@ -832,12 +1050,9 @@ class ResultCollectorPlugin:
                     if stdout_content.strip():  # Only store if there's actual content
                         accumulated_stdout = stdout_content
 
-            self.collected_results[report.nodeid] = TestResult(report=report, call=call, stdout=accumulated_stdout)
-            # You could store more details here if needed
-            # item.config.my_test_results[report.nodeid] = {
-            #     "outcome": report.outcome,
-            #     "duration": report.duration,
-            # }
+            # pytest also calls this hook for each subtest, with the subtest's call info,
+            # so pytest_runtest_logreport decides where the result goes.
+            self.pending_calls[report.nodeid] = TestResult(report=report, call=call, stdout=accumulated_stdout)
 
         fixture = None
         # This code section appears to be unused legacy code
@@ -851,6 +1066,26 @@ class ResultCollectorPlugin:
             # )
         # if fixture:
         #     fixture.skipped = outcome.get_result().outcome == "skipped"
+
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        """
+        Sort each call result into the test's own result or one of its subtests' results.
+        """
+        if report.when != "call" or report.nodeid not in self.pending_calls:
+            return
+
+        result = self.pending_calls.pop(report.nodeid)
+        if isinstance(report, pytest.SubtestReport):
+            self.subtest_results.setdefault(report.nodeid, []).append(
+                SubtestResult(
+                    label=report.context.msg,
+                    outcome=report.outcome,
+                    excinfo=result.call.excinfo,
+                    weight=report.context.kwargs.get("weight"),
+                )
+            )
+        else:
+            self.collected_results[report.nodeid] = result
 
     @pytest.fixture
     def feedback(self, request: pytest.FixtureRequest) -> FeedbackFixture:
@@ -919,43 +1154,23 @@ class ResultCollectorPlugin:
                 # Create an empty feedback object if none was created during the test
                 feedback_obj = FeedbackFixture(test_id=nodeid)
 
-            # If the test failed (in any phase), add the exception message to the feedback
+            config_level = _get_config_output_level(getattr(item, "module", None))
+            output_level: GradingOutputLevel = get_output_level_marker(item.get_closest_marker("output"), config_level)
+            logger.debug(f"Grading output level set to: {output_level}")
+
+            subtests = self.subtest_results.get(nodeid, [])
+            subtest_weights: list[float] | None = None
+            if subtests:
+                try:
+                    subtest_weights = get_subtest_weights(subtests)
+                    feedback_obj.add_message(format_subtest_results(subtests, output_level))
+                except ValueError as e:
+                    feedback_obj.add_message(str(e))
+
+            # If the test failed (in any phase), add the exception message to the feedback.
+            # A test whose subtests failed is also marked failed, but without exception info.
             if report.outcome == "failed" and call.excinfo is not None:
-                config_level = _get_config_output_level(getattr(item, "module", None))
-                output_level: GradingOutputLevel = get_output_level_marker(item.get_closest_marker("output"), config_level)
-
-                logger.debug(f"Grading output level set to: {output_level}")
-
-                if output_level == GradingOutputLevel.Friendly:
-                    # Friendly mode: show only the exception message text with
-                    # no exception class name, traceback, or "failed with" prefix.
-                    exception_message = str(call.excinfo.value)
-                    feedback_obj.add_message(exception_message)
-
-                else:
-                    # Customize the message based on the failure phase
-                    if report.when == "setup":
-                        phase_message = "Student code execution failed with an exception"
-                    elif report.when == "teardown":
-                        phase_message = "Student code teardown failed with an exception"
-                    else:
-                        phase_message = "Student code grading failed with an exception"
-
-                    if output_level == GradingOutputLevel.ExceptionName:
-                        exception_name = call.excinfo.type.__name__
-                        fail_message = f"{phase_message}: {exception_name}"
-                        feedback_obj.add_message(fail_message)
-
-                    elif output_level == GradingOutputLevel.ExceptionMessage:
-                        exception_name = call.excinfo.type.__name__
-                        # TODO make this work with multiline messages somehow?
-                        exception_message = str(call.excinfo.value).split(os.linesep)[0]
-                        fail_message = f"{phase_message}: {exception_name}{os.linesep}Exception Message: {exception_message}"
-                        feedback_obj.add_message(fail_message)
-
-                    # If showing more than the exception name, show the message + full traceback
-                    else:
-                        feedback_obj.add_message(str(call.excinfo.getrepr(style="no")))
+                feedback_obj.add_message(format_failure(call.excinfo, output_level, report.when))
 
             # Check if stdout feedback should be included (default True)
             include_stdout_feedback = grading_data.get("include_stdout_feedback", True)
@@ -996,6 +1211,19 @@ class ResultCollectorPlugin:
                     # e.g., "xpassed", "xfailed", etc.
                     # For now, we raise an error for unexpected outcomes
                     raise ValueError(f"Unexpected outcome '{outcome}' for test '{nodeid}'.")
+
+            # A test with subtests gets the weighted fraction of them that passed, and skipped
+            # subtests count as failed. pytest marks the test failed when any subtest fails, so check
+            # whether the test body itself raised instead. If it did, the score from above (0 or
+            # set_score) stays. A test with an invalid weight gets 0.
+            if subtests and report.when == "call" and call.excinfo is None and not feedback_obj.final_score_override:
+                if subtest_weights is None:
+                    res_obj["points_frac"] = 0.0
+                    res_obj["outcome"] = "failed"
+                else:
+                    passed_weight = sum(w for subtest, w in zip(subtests, subtest_weights, strict=True) if subtest.outcome == "passed")
+                    res_obj["points_frac"] = passed_weight / sum(subtest_weights)
+                    res_obj["outcome"] = "passed" if all(subtest.outcome == "passed" for subtest in subtests) else "failed"
 
             res_obj["points"] = res_obj["points_frac"] * res_obj["max_points"]
             final_results.append(res_obj)

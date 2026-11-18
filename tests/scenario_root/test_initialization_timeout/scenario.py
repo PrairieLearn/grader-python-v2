@@ -1,9 +1,9 @@
-# Module-level initialization timeout (used as default)
-initialization_timeout = 0.5
-
 import pytest
 
 from pytest_prairielearn_grader.fixture import StudentFixture
+
+# Module-level initialization timeout (used as default)
+initialization_timeout = 0.5
 
 
 @pytest.mark.grading_data(name="uses_module_timeout", points=2)

@@ -67,7 +67,8 @@ def test_0(sandbox: StudentFixture, feedback: FeedbackFixture, data_json: DataFi
 
     assert st_result is not None, "Your function did not return any value. Ensure you have a return statement."
 
-    assert isinstance(st_result, list) and len(st_result) == 3, "Your function should return a tuple with exactly three elements."
+    assert isinstance(st_result, list), "Your function should return a tuple with exactly three elements."
+    assert len(st_result) == 3, "Your function should return a tuple with exactly three elements."
 
     points = 0
 

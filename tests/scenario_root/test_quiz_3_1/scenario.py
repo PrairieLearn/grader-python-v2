@@ -31,7 +31,7 @@ def compute_starting_parameters() -> tuple[list[str], list[ParameterDict]]:
             continue
         hours_set.add(hours)
         rng.shuffle(members)
-        sale_metadata.append({"hours": list(zip(members, hours)), "units_sold": rng.integers(100, 2001)})
+        sale_metadata.append({"hours": list(zip(members, hours, strict=True)), "units_sold": rng.integers(100, 2001)})
 
     return members, sale_metadata
 
@@ -64,7 +64,7 @@ def test_0(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
     ref_member_ratings, _, _ = compute_answers(members, sale_metadata)
 
     if student_member_ratings is not None:
-        if type(student_member_ratings) != dict:
+        if not isinstance(student_member_ratings, dict):
             feedback.add_message("member_ratings is not a dictionary")
         else:
             for member, rating in student_member_ratings.items():

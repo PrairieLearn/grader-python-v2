@@ -1,14 +1,21 @@
+import base64
 import json
 import logging
+import multiprocessing
 import os
-import socket
-import subprocess
+import shutil
+import signal
+import stat
 import sys
-from importlib.resources import files
+import tempfile
+from collections.abc import Callable
+from multiprocessing.connection import Connection
+from multiprocessing.context import SpawnProcess
 from pathlib import Path
 from typing import Any
 from typing import NamedTuple
 
+from ._student_code_runner import _serve
 from .json_utils import from_json
 from .utils import FunctionStatusCode
 from .utils import MessageType
@@ -28,15 +35,44 @@ from .utils import StudentQueryRequest
 from .utils import StudentQueryResponse
 from .utils import WorkspaceStartRequest
 from .utils import deserialize_object_unsafe
-from .utils import drop_privileges
+from .utils import format_call
 from .utils import serialize_object_unsafe
 
 DataFixture = dict[str, Any]
 
-SCRIPT_PATH = str(files("pytest_prairielearn_grader").joinpath("_student_code_runner.py"))
+# The sandbox runs in a child process started with the "spawn" method. spawn gives the child a fresh
+# interpreter instead of forking the grader's memory, which would break the sandbox's isolation.
+_MP_CONTEXT = multiprocessing.get_context("spawn")
 DEFAULT_TIMEOUT = 1.0
+# Extra time to wait for the start response, so that the sandbox's own
+# initialization timeout is reported instead of racing against the read timeout.
+START_RESPONSE_GRACE = 0.5
+# Seconds to wait for the sandbox's process to exit after it closes the connection, to read why it stopped.
+STOPPED_PROCESS_WAIT = 1.0
+
+# Modes for the data files folder (see _make_data_files_dir). Everyone can read the files and list the
+# folders, and nobody can change them; only the owner (root, in the Docker image) can make them writable again.
+_READ_ONLY_FILE_MODE = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH  # r--r--r--
+_READ_ONLY_DIR_MODE = _READ_ONLY_FILE_MODE | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH  # r-xr-xr-x
+# Lets the owner delete the folder's contents at cleanup.
+_OWNER_WRITABLE_DIR_MODE = _READ_ONLY_DIR_MODE | stat.S_IWUSR  # rwxr-xr-x
 
 logger = logging.getLogger(__name__)
+
+
+class SandboxStopped(RuntimeError):
+    """
+    Raised by a query on a sandbox where an earlier query timed out.
+
+    The student code may still send the reply to the call that timed out, and a later query would
+    read it as its own answer. So after a timeout, the sandbox refuses all further queries.
+    """
+
+    timed_out_call: str
+
+    def __init__(self, timed_out_call: str) -> None:
+        super().__init__(f"This check didn't run because {timed_out_call}.")
+        self.timed_out_call = timed_out_call
 
 
 def _extract_notebook_code(notebook_path: Path, cell_tag: str | None = None) -> str:
@@ -56,7 +92,7 @@ def _extract_notebook_code(notebook_path: Path, cell_tag: str | None = None) -> 
         ImportError: If ``nbformat`` is not installed.
     """
     try:
-        import nbformat  # type: ignore[import-untyped]
+        import nbformat  # type: ignore[import-untyped]  # noqa: PLC0415
     except ImportError:
         raise ImportError(
             "nbformat is required for Jupyter notebook grading support. Install it with: pip install 'pytest-prairielearn-grader[notebook]'"
@@ -77,6 +113,33 @@ def _extract_notebook_code(notebook_path: Path, cell_tag: str | None = None) -> 
         code_parts.append(source)
 
     return "\n\n".join(code_parts)
+
+
+def _make_data_files_dir(data_files: dict[str, Path]) -> Path:
+    """Copy each data file to its relative path in a new folder that only its owner can change.
+
+    The folder is made by the grader process, so in the Docker image it's owned by root and the
+    sandbox user can read the copies but not change, add or remove anything.
+    """
+    root = Path(tempfile.mkdtemp(prefix="pl-data-files-"))
+    try:
+        for relative_path, source in data_files.items():
+            destination = root / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            destination.chmod(_READ_ONLY_FILE_MODE)
+        for directory in [root, *(path for path in root.rglob("*") if path.is_dir())]:
+            directory.chmod(_READ_ONLY_DIR_MODE)
+    except BaseException:
+        _remove_data_files_dir(root)
+        raise
+    return root
+
+
+def _remove_data_files_dir(root: Path) -> None:
+    for directory in [root, *(path for path in root.rglob("*") if path.is_dir())]:
+        directory.chmod(_OWNER_WRITABLE_DIR_MODE)
+    shutil.rmtree(root, ignore_errors=True)
 
 
 class StudentFiles(NamedTuple):
@@ -104,17 +167,39 @@ class FeedbackFixture:
 
     test_id: str
     messages: list[str]
+    images: list[dict[str, str]]
     score: float | None
     final_score_override: bool
 
     def __init__(self, test_id: str) -> None:
         self.test_id = test_id
         self.messages = []
+        self.images = []
         self.score = None
         self.final_score_override = False
 
     def add_message(self, message: str) -> None:
         self.messages.append(message)
+
+    def add_image(self, image: Any, *, label: str | None = None) -> None:
+        """
+        Shows an image with this test's results, such as a plot queried from student code.
+
+        `image` is a matplotlib Figure or Axes, or the bytes of a PNG file. PrairieLearn limits the
+        whole results file to 1 MB, so add only a few images.
+        """
+        if isinstance(image, bytes):
+            png = image
+        else:
+            # matplotlib is an optional dependency, so only import it when a plot is added.
+            from pytest_prairielearn_grader.matplotlib_json import plot_to_png  # noqa: PLC0415
+
+            png = plot_to_png(image)
+
+        entry = {"url": "data:image/png;base64," + base64.b64encode(png).decode("ascii")}
+        if label is not None:
+            entry["label"] = label
+        self.images.append(entry)
 
     def set_score(self, score: float) -> None:
         self.score = score
@@ -132,29 +217,37 @@ class FeedbackFixture:
         self.final_score_override = True
 
     def to_dict(self) -> dict:
-        return {
+        result: dict[str, Any] = {
             "test_id": self.test_id,
             "message": os.linesep.join(self.messages),
             "points_frac": self.score,
         }
+        if self.images:
+            result["images"] = self.images
+        return result
 
 
 class _SandboxBase:
     """
-    Shared subprocess/socket plumbing used by StudentFixture and WorkspaceFixture.
+    Shared child-process/pipe plumbing used by StudentFixture and WorkspaceFixture.
     Not intended to be instantiated directly.
     """
 
-    process: subprocess.Popen | None
-    student_socket: socket.socket | None
+    process: SpawnProcess | None
+    _conn: Connection | None
+    _read_timeout: float
     import_whitelist: list[str] | None
     import_blacklist: list[str] | None
     starting_vars: dict[str, Any] | None
     builtin_whitelist: list[str] | None
     names_for_user_list: list[str] | None
     worker_username: str | None
+    helper_modules: dict[str, str] | None
+    data_files: dict[str, Path] | None
+    _data_files_dir: Path | None
     _accumulated_stdout: list[str]
     _server_failure: str | None
+    _timed_out_call: str | None
 
     def __init__(
         self,
@@ -164,6 +257,8 @@ class _SandboxBase:
         builtin_whitelist: list[str] | None,
         names_for_user_list: list[str] | None,
         worker_username: str | None,
+        helper_modules: dict[str, str] | None = None,
+        data_files: dict[str, Path] | None = None,
     ) -> None:
         self.import_whitelist = import_whitelist
         self.import_blacklist = import_blacklist
@@ -171,84 +266,119 @@ class _SandboxBase:
         self.builtin_whitelist = builtin_whitelist
         self.names_for_user_list = names_for_user_list
         self.worker_username = worker_username
+        self.helper_modules = helper_modules
+        self.data_files = data_files
+        self._data_files_dir = None
         self.process = None
-        self.student_socket = None
+        self._conn = None
+        self._read_timeout = DEFAULT_TIMEOUT
         self._accumulated_stdout = []
         self._server_failure = None
+        self._timed_out_call = None
+
+    def _start_server(
+        self,
+        initialization_timeout: float,
+        build_start_message: Callable[[], Any],
+        after_send: Callable[[], None] | None = None,
+    ) -> ProcessStartResponse:
+        """Spawn the child process, send the start message it builds, and read the start response.
+
+        *after_send*, if given, runs between sending the start message and reading the start
+        response. The student fixture uses it to receive the setup snapshot and release the sandbox.
+        """
+        self._start_subprocess()
+        json_message = build_start_message()
+        # The snapshot and the start response both arrive after setup/student code, so allow the
+        # full initialization window for each read.
+        self._read_timeout = initialization_timeout + START_RESPONSE_GRACE
+        self._send_json_object(json_message)
+        if after_send is not None:
+            try:
+                after_send()
+            except Exception as e:
+                return _no_response(e)
+        return self._read_start_response(initialization_timeout)
 
     def _assert_process_running(self) -> None:
         assert self.process is not None, "Sandbox process is not running. Please start it first."
-        process_return_code = self.process.poll()
-        if process_return_code is not None:
-            raise RuntimeError(f"Sandbox process terminated with code {process_return_code}.")
+        if self.process.exitcode is not None:
+            raise RuntimeError(f"Sandbox process terminated with code {self.process.exitcode}.")
 
     def _send_json_object(self, json_object: Any) -> None:
-        assert self.student_socket is not None, "Socket is not connected. Please start the sandbox server first."
-        self.student_socket.sendall((json.dumps(json_object) + os.linesep).encode("utf-8"))
+        assert self._conn is not None, "Pipe is not connected. Please start the sandbox server first."
+        self._conn.send(json_object)
 
-    def _read_from_socket(self) -> bytes:
-        """Read from the socket until a line terminator is found."""
-        buffer = bytearray()
-        terminator = os.linesep.encode("utf-8")
-        max_len: int | None = None  # TODO add max length parameter?
-        assert self.student_socket is not None, "Socket is not connected. Please start the sandbox server first."
-        chunk_size = 4096
-        chunk: bytes = b""
-        # TODO maybe set a hard iteration limit to avoid infinite loops?
-        while (idx := chunk.rfind(terminator)) == -1:
-            try:
-                chunk = self.student_socket.recv(chunk_size)
-            except TimeoutError as e:
-                raise TimeoutError("Socket read timed out.") from e
-            if not chunk:
-                raise Exception("Connection closed by peer before termination character was found.")
-            buffer.extend(chunk)
-            if max_len is not None and len(buffer) >= max_len:
-                raise Exception(f"Maximum read length of {max_len} exceeded.")
-        loc = len(buffer) - len(chunk) + idx + len(terminator)
-        return buffer[:loc]
+    def _recv_message(self) -> Any:
+        """Read one message from the pipe, waiting up to the current read timeout for it to arrive."""
+        assert self._conn is not None, "Pipe is not connected. Please start the sandbox server first."
+        if not self._conn.poll(self._read_timeout):
+            raise TimeoutError("Pipe read timed out.")
+        try:
+            return self._conn.recv()
+        except EOFError as e:
+            # The child closed its end without sending a reply, i.e. its process stopped.
+            self._server_failure = self._describe_stopped_sandbox()
+            self._assert_no_server_failure()
+            raise RuntimeError(self._server_failure) from e  # unreachable: the assert above raises
+
+    def _describe_stopped_sandbox(self) -> str:
+        """Say why the sandbox closed the connection, from how its process exited."""
+        return_code = None
+        if self.process is not None:
+            self.process.join(timeout=STOPPED_PROCESS_WAIT)
+            return_code = self.process.exitcode
+        # The kernel's out-of-memory killer, and container memory limits, stop a process with SIGKILL.
+        if sys.platform != "win32" and return_code == -signal.SIGKILL:
+            return "The sandbox running your code was killed, probably because your code used too much memory."
+        if return_code is not None:
+            return f"The sandbox running your code stopped unexpectedly with exit code {return_code}."
+        return "The sandbox running your code stopped unexpectedly."
 
     def _assert_no_server_failure(self) -> None:
         if self._server_failure is not None:
             raise RuntimeError(self._server_failure)
+        if self._timed_out_call is not None:
+            raise SandboxStopped(self._timed_out_call)
 
     def _read_query_response(self) -> Any:
         """Read a response to a query, raising a clear error if the server failed and closed the connection."""
-        data = json.loads(self._read_from_socket().decode())
+        data = self._recv_message()
         if data.get("status") == ServerStatusCode.FAILURE:
             self._server_failure = f"The sandbox stopped unexpectedly, so later queries won't work: {data['message']}"
             self._assert_no_server_failure()
+        # A successful query or function call sends its value as a JSON string; decode it back to a
+        # structure so the response matches what callers (and from_json) expect.
+        if data.get("status") == QueryStatusCode.SUCCESS:
+            data["value"] = json.loads(data["value"])
         return data
 
     def _start_subprocess(self) -> None:
-        """Spawn the runner subprocess and store it in ``self.process``."""
+        """Spawn the runner child process and store it in ``self.process``."""
+        # With data files, the sandbox starts in a folder holding copies of them, so student code can
+        # read them by relative path. Without them, the starting folder is left as it was.
+        if self.data_files is not None:
+            self._data_files_dir = _make_data_files_dir(self.data_files)
 
-        def try_drop_privileges() -> None:
-            if self.worker_username is not None:
-                drop_privileges(self.worker_username)
-
-        self.process = subprocess.Popen(
-            args=(sys.executable, SCRIPT_PATH),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            preexec_fn=None if sys.platform == "win32" else try_drop_privileges,
+        parent_conn, child_conn = _MP_CONTEXT.Pipe()
+        data_files_dir = None if self._data_files_dir is None else str(self._data_files_dir)
+        self.process = _MP_CONTEXT.Process(
+            target=_serve,
+            args=(child_conn, self.worker_username, data_files_dir),
+            daemon=True,
         )
+        self.process.start()
+        # Close the child's end in the grader so that if the child process dies, the grader's recv
+        # sees EOF instead of blocking on a handle it still holds open itself.
+        child_conn.close()
+        self._conn = parent_conn
         self._assert_process_running()
 
-    def _connect_to_server(self, timeout: float) -> None:
-        """Read the host/port printed by the subprocess and connect the socket."""
-        assert self.process is not None and self.process.stdout is not None
-        host, port = self.process.stdout.readline().decode().strip().split(",")
-        self.student_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.student_socket.settimeout(timeout)
-        self.student_socket.connect((host, int(port)))
-
-    def _read_start_response(self) -> ProcessStartResponse:
+    def _read_start_response(self, initialization_timeout: float) -> ProcessStartResponse:
         """Read and return the ProcessStartResponse sent after the start message."""
+        self._read_timeout = initialization_timeout + START_RESPONSE_GRACE
         try:
-            data = self._read_from_socket().decode()
-            res: ProcessStartResponse = json.loads(data)
+            res: ProcessStartResponse = self._recv_message()
             if res.get("stdout"):
                 self._accumulated_stdout.append(res["stdout"])
         except Exception as e:
@@ -259,10 +389,13 @@ class _SandboxBase:
         self._assert_no_server_failure()
         self._assert_process_running()
         json_message = StudentQueryRequest(message_type=MessageType.QUERY, var=var_to_query, query_timeout=query_timeout)
-        assert self.student_socket is not None
-        self.student_socket.settimeout(query_timeout)
+        self._read_timeout = query_timeout
         self._send_json_object(json_message)
-        data: StudentQueryResponse = self._read_query_response()
+        try:
+            data: StudentQueryResponse = self._read_query_response()
+        except TimeoutError as error:
+            self._timed_out_call = f"the query for '{var_to_query}' timed out after {query_timeout} seconds"
+            raise TimeoutError(f"The query for '{var_to_query}' timed out after {query_timeout} seconds.") from error
         return data
 
     def query(self, var_to_query: str, *, query_timeout: float = DEFAULT_TIMEOUT) -> Any:
@@ -281,9 +414,9 @@ class _SandboxBase:
         """Call a student function and return its protocol response.
 
         A socket timeout is returned as ``FunctionStatusCode.TIMEOUT`` rather
-        than raised. Callers must stop issuing requests on this sandbox after a
-        timeout because the student process may still write the timed-out
-        request's response.
+        than raised. After a timeout, every later query on this sandbox raises
+        SandboxStopped, because the student process may still write the
+        timed-out request's response.
 
         Raises a RuntimeError if the sandbox server failed, for example because it
         couldn't load the arguments. The sandbox can't be used after that.
@@ -296,9 +429,8 @@ class _SandboxBase:
             kwargs_encoded=serialize_object_unsafe(kwargs),
             query_timeout=query_timeout,
         )
-        assert self.student_socket is not None
-        self.student_socket.settimeout(query_timeout)
-        self.student_socket.sendall((json.dumps(json_message) + os.linesep).encode("utf-8"))
+        self._read_timeout = query_timeout
+        self._send_json_object(json_message)
         try:
             data: StudentFunctionResponse = self._read_query_response()
         except TimeoutError as error:
@@ -308,9 +440,14 @@ class _SandboxBase:
                 "stdout": "",
                 "stderr": "",
                 "exception_name": type(error).__name__,
-                "exception_message": str(error),
+                "exception_message": None,
                 "traceback": None,
             }
+        # The student process also times out the call, and its reply can arrive before the socket
+        # read times out. Either way, the function may still be running, so stop the sandbox.
+        if data["status"] == FunctionStatusCode.TIMEOUT:
+            self._timed_out_call = f"{format_call(function_name, args, kwargs)} timed out after {query_timeout} seconds"
+            data["exception_message"] = f"{self._timed_out_call}."
         if data.get("stdout"):
             self._accumulated_stdout.append(data["stdout"])
         return data
@@ -320,14 +457,12 @@ class _SandboxBase:
         response = self.query_function_raw(function_name, *args, query_timeout=query_timeout, **kwargs)
         match response["status"]:
             case FunctionStatusCode.EXCEPTION:
-                raise RuntimeError(
-                    f"Function '{function_name}' raised an exception "
-                    f"{response['exception_name']}: {response['exception_message']}\n{response['traceback']}"
-                )
+                call = format_call(function_name, args, kwargs)
+                raise RuntimeError(f"{call} raised {response['exception_name']}: {response['exception_message']}\n{response['traceback']}")
             case FunctionStatusCode.TIMEOUT:
-                raise TimeoutError(f"Query for function '{function_name}' timed out after {query_timeout} seconds.")
+                raise TimeoutError(response["exception_message"])
             case FunctionStatusCode.NOT_FOUND:
-                raise NameError(f"Query for function '{function_name}' failed: {response['exception_message']}")
+                raise NameError(response["exception_message"])
             case FunctionStatusCode.NOT_SERIALIZABLE:
                 raise RuntimeError(response["exception_message"])
         return from_json(response["value"])
@@ -337,13 +472,16 @@ class _SandboxBase:
         return "".join(self._accumulated_stdout)
 
     def _cleanup(self) -> None:
-        if self.student_socket is not None:
-            self.student_socket.close()
-            self.student_socket = None
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
         if self.process is not None:
             self.process.terminate()
-            self.process.wait()
+            self.process.join()
             self.process = None
+        if self._data_files_dir is not None:
+            _remove_data_files_dir(self._data_files_dir)
+            self._data_files_dir = None
 
 
 class StudentFixture(_SandboxBase):
@@ -363,8 +501,19 @@ class StudentFixture(_SandboxBase):
         names_for_user_list: list[str] | None,
         worker_username: str | None,
         notebook_cell_tag: str | None = None,
+        helper_modules: dict[str, str] | None = None,
+        data_files: dict[str, Path] | None = None,
     ) -> None:
-        super().__init__(import_whitelist, import_blacklist, starting_vars, builtin_whitelist, names_for_user_list, worker_username)
+        super().__init__(
+            import_whitelist,
+            import_blacklist,
+            starting_vars,
+            builtin_whitelist,
+            names_for_user_list,
+            worker_username,
+            helper_modules=helper_modules,
+            data_files=data_files,
+        )
         self.leading_file = file_names.leading_file
         self.trailing_file = file_names.trailing_file
         self.student_code_file = file_names.student_code_file
@@ -378,50 +527,44 @@ class StudentFixture(_SandboxBase):
         else:
             logger.debug("Starting student code server without dropping privileges.")
 
-        self._start_subprocess()
+        def build_start_message() -> ProcessStartRequest:
+            student_code = ""
+            if self.leading_file.is_file():
+                student_code += self.leading_file.read_text(encoding="utf-8")
+                student_code += os.linesep
+            if self.student_code_file.is_file():
+                if self.student_code_file.suffix.lower() == ".ipynb":
+                    student_code += _extract_notebook_code(self.student_code_file, self.notebook_cell_tag)
+                else:
+                    student_code += self.student_code_file.read_text(encoding="utf-8")
+            if self.trailing_file.is_file():
+                student_code += os.linesep
+                student_code += self.trailing_file.read_text(encoding="utf-8")
 
-        student_code = ""
-        if self.leading_file.is_file():
-            student_code += self.leading_file.read_text(encoding="utf-8")
-            student_code += os.linesep
-        if self.student_code_file.is_file():
-            if self.student_code_file.suffix.lower() == ".ipynb":
-                student_code += _extract_notebook_code(self.student_code_file, self.notebook_cell_tag)
-            else:
-                student_code += self.student_code_file.read_text(encoding="utf-8")
-        if self.trailing_file.is_file():
-            student_code += os.linesep
-            student_code += self.trailing_file.read_text(encoding="utf-8")
+            setup_code = None
+            if self.setup_code_file.is_file():
+                setup_code = self.setup_code_file.read_text(encoding="utf-8")
 
-        setup_code = None
-        if self.setup_code_file.is_file():
-            setup_code = self.setup_code_file.read_text(encoding="utf-8")
+            # TODO make this a shared type
+            return ProcessStartRequest(
+                message_type=MessageType.START,
+                student_code=student_code,
+                student_file_name=str(self.student_code_file),
+                setup_code=setup_code,
+                initialization_timeout=initialization_timeout,
+                import_whitelist=self.import_whitelist,
+                import_blacklist=self.import_blacklist,
+                starting_vars=self.starting_vars,
+                builtin_whitelist=self.builtin_whitelist,
+                names_for_user_list=self.names_for_user_list,
+                helper_modules=self.helper_modules,
+            )
 
-        self._connect_to_server(initialization_timeout)
-
-        # TODO make this a shared type
-        json_message = ProcessStartRequest(
-            message_type=MessageType.START,
-            student_code=student_code,
-            student_file_name=str(self.student_code_file),
-            setup_code=setup_code,
-            initialization_timeout=initialization_timeout,
-            import_whitelist=self.import_whitelist,
-            import_blacklist=self.import_blacklist,
-            starting_vars=self.starting_vars,
-            builtin_whitelist=self.builtin_whitelist,
-            names_for_user_list=self.names_for_user_list,
-        )
-        self._send_json_object(json_message)
-        try:
-            self._receive_setup_snapshot()
-        except Exception as e:
-            return _no_response(e)
-        return self._read_start_response()
+        return self._start_server(initialization_timeout, build_start_message, after_send=self._receive_setup_snapshot)
 
     def _receive_setup_snapshot(self) -> None:
-        """Store the setup variables and release the subprocess to start running student code."""
-        snapshot: SetupSnapshotMessage = json.loads(self._read_from_socket().decode())
+        """Store the setup snapshot and acknowledge it, which releases the sandbox to run student code."""
+        snapshot: SetupSnapshotMessage = self._recv_message()
         if snapshot.get("message_type") != "setup_snapshot":
             raise RuntimeError(f"Expected the setup snapshot from the sandbox, but got: {snapshot}")
         self._setup_snapshot = snapshot["variables"]
@@ -433,8 +576,7 @@ class StudentFixture(_SandboxBase):
         self._assert_no_server_failure()
         self._assert_process_running()
         json_message: SetupQueryRequest = {"message_type": MessageType.QUERY_SETUP, "var": var_to_query}
-        assert self.student_socket is not None, "Student socket is not connected. Please start the student code server first."
-        self.student_socket.settimeout(query_timeout)
+        self._read_timeout = query_timeout
         self._send_json_object(json_message)
         data: SetupQueryResponse = self._read_query_response()
         return data
@@ -444,9 +586,9 @@ class StudentFixture(_SandboxBase):
         Return a value from the setup code.
 
         Values JSON can't represent, such as functions, were dill-encoded before student code
-        started, so they hold nothing from the student and are read from that stored copy.
-        Other values stay in the sandbox and are sent as JSON when queried. Student code could
-        change these, but they can't run code in the grader.
+        started, so they hold nothing from the student and are read from that stored snapshot.
+        Other values stay in the sandbox and are sent as JSON when queried. Student code that gets
+        around the sandbox could change these, but it can't run code in the grader this way.
         """
         assert self._setup_snapshot is not None, "Setup variables are not available. Please start the student code server first."
         snapshot_entry = self._setup_snapshot.get(var_to_query)
@@ -504,36 +646,46 @@ class WorkspaceFixture(_SandboxBase):
         names_for_user_list: list[str] | None,
         worker_username: str | None,
         exec_entry: str | None = None,
+        helper_modules: dict[str, str] | None = None,
+        data_files: dict[str, Path] | None = None,
     ) -> None:
-        super().__init__(import_whitelist, import_blacklist, starting_vars, builtin_whitelist, names_for_user_list, worker_username)
+        super().__init__(
+            import_whitelist,
+            import_blacklist,
+            starting_vars,
+            builtin_whitelist,
+            names_for_user_list,
+            worker_username,
+            helper_modules=helper_modules,
+            data_files=data_files,
+        )
         self.workspace_dir = workspace_dir
         self.setup_code_file = setup_code_file
         self.exec_entry = exec_entry
 
     def start_workspace_server(self, *, initialization_timeout: float = DEFAULT_TIMEOUT) -> ProcessStartResponse:
         """Start the sandbox subprocess and initialise the workspace."""
-        self._start_subprocess()
 
-        setup_code: str | None = None
-        if self.setup_code_file.is_file():
-            setup_code = self.setup_code_file.read_text(encoding="utf-8")
+        def build_start_message() -> WorkspaceStartRequest:
+            setup_code: str | None = None
+            if self.setup_code_file.is_file():
+                setup_code = self.setup_code_file.read_text(encoding="utf-8")
 
-        self._connect_to_server(initialization_timeout)
+            return WorkspaceStartRequest(
+                message_type=MessageType.START_WORKSPACE,
+                workspace_dir=str(self.workspace_dir),
+                exec_entry=self.exec_entry,
+                setup_code=setup_code,
+                initialization_timeout=initialization_timeout,
+                import_whitelist=self.import_whitelist,
+                import_blacklist=self.import_blacklist,
+                starting_vars=self.starting_vars,
+                builtin_whitelist=self.builtin_whitelist,
+                names_for_user_list=self.names_for_user_list,
+                helper_modules=self.helper_modules,
+            )
 
-        json_message = WorkspaceStartRequest(
-            message_type=MessageType.START_WORKSPACE,
-            workspace_dir=str(self.workspace_dir),
-            exec_entry=self.exec_entry,
-            setup_code=setup_code,
-            initialization_timeout=initialization_timeout,
-            import_whitelist=self.import_whitelist,
-            import_blacklist=self.import_blacklist,
-            starting_vars=self.starting_vars,
-            builtin_whitelist=self.builtin_whitelist,
-            names_for_user_list=self.names_for_user_list,
-        )
-        self._send_json_object(json_message)
-        return self._read_start_response()
+        return self._start_server(initialization_timeout, build_start_message)
 
     def __repr__(self) -> str:
         return f"WorkspaceFixture(workspace_dir={self.workspace_dir})"

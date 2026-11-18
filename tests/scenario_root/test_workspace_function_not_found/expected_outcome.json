@@ -1,0 +1,127 @@
+{
+  "expected_data_object": {
+    "score": 1.0,
+    "tests": [
+      {
+        "max_points": 1,
+        "name": "not_found",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_missing_names_are_not_found[missing_flat_name]"
+      },
+      {
+        "max_points": 1,
+        "name": "not_found",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_missing_names_are_not_found[calculator.missing_function]"
+      },
+      {
+        "max_points": 1,
+        "name": "not_found",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_missing_names_are_not_found[no_such_module.function]"
+      },
+      {
+        "max_points": 1,
+        "name": "not_found",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_missing_names_are_not_found[no_such_package.no_such_module.function]"
+      },
+      {
+        "max_points": 1,
+        "name": "not_found",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_missing_names_are_not_found[pkg.no_such_module.function]"
+      },
+      {
+        "max_points": 1,
+        "name": "not_found",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_missing_names_are_not_found[calculator.add_one.function]"
+      },
+      {
+        "max_points": 1,
+        "name": "query_function",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_query_function_raises_clear_error"
+      },
+      {
+        "max_points": 1,
+        "name": "exceptions",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_student_errors_stay_exceptions[calculator.raises_key_error-KeyError-missing_key]"
+      },
+      {
+        "max_points": 1,
+        "name": "exceptions",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_student_errors_stay_exceptions[calculator.raises_import_error-ImportError-student import problem]"
+      },
+      {
+        "max_points": 1,
+        "name": "exceptions",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_student_errors_stay_exceptions[calculator.imports_missing_module-ModuleNotFoundError-no_such_module_inside_function]"
+      },
+      {
+        "max_points": 1,
+        "name": "exceptions",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_student_errors_stay_exceptions[has_bad_import.function-ModuleNotFoundError-no_such_module_in_student_file]"
+      },
+      {
+        "max_points": 1,
+        "name": "exceptions",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_student_errors_stay_exceptions[raises_import_error_on_load.function-ImportError-student module problem]"
+      },
+      {
+        "max_points": 1,
+        "name": "exceptions",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_student_errors_stay_exceptions[raises_attribute_error_on_load.function-AttributeError-attribute]"
+      },
+      {
+        "max_points": 1,
+        "name": "exceptions",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_student_errors_stay_exceptions[calculator.CONSTANT-TypeError-not callable]"
+      },
+      {
+        "max_points": 1,
+        "name": "existing_functions",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_workspace_function_not_found.py::test_existing_functions_still_work"
+      }
+    ]
+  }
+}

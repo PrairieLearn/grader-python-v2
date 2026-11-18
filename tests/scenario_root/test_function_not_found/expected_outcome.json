@@ -1,0 +1,105 @@
+{
+  "expected_data_object": {
+    "score": 0.8333333333333334,
+    "tests": [
+      {
+        "max_points": 1,
+        "name": "raw_response",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_function_not_found.py::test_raw_response_has_all_fields[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "query_function",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_function_not_found.py::test_query_function_raises_clear_error[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "student_errors",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_function_not_found.py::test_errors_inside_function_stay_exceptions[student_code-raises_key_error-KeyError-'missing_key']"
+      },
+      {
+        "max_points": 1,
+        "name": "student_errors",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_function_not_found.py::test_errors_inside_function_stay_exceptions[student_code-raises_key_error_with_function_name-KeyError-'missing_function']"
+      },
+      {
+        "max_points": 1,
+        "name": "student_errors",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_function_not_found.py::test_errors_inside_function_stay_exceptions[student_code-raises_attribute_error-AttributeError-missing_attribute]"
+      },
+      {
+        "max_points": 1,
+        "name": "student_errors",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_function_not_found.py::test_errors_inside_function_stay_exceptions[student_code-raises_import_error-ImportError-student import problem]"
+      },
+      {
+        "max_points": 1,
+        "name": "student_errors",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_function_not_found.py::test_errors_inside_function_stay_exceptions[student_code-raises_name_error-NameError-undefined_variable]"
+      },
+      {
+        "max_points": 1,
+        "name": "output_kept",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_function_not_found.py::test_output_kept_for_student_errors[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "not_callable",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_function_not_found.py::test_name_that_is_not_callable_stays_an_exception[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "later_queries",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_function_not_found.py::test_later_queries_still_work[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "assert_fn_equal",
+        "points": 0.0,
+        "points_frac": 0.0,
+        "outcome": "failed",
+        "test_id": "test_function_not_found.py::test_assert_fn_equal_shows_clear_message[student_code]",
+        "message": "Function 'missing_function' wasn't found in the student code"
+      },
+      {
+        "max_points": 1,
+        "name": "assert_fn_approx_equal",
+        "points": 0.0,
+        "points_frac": 0.0,
+        "outcome": "failed",
+        "test_id": "test_function_not_found.py::test_assert_fn_approx_equal_shows_clear_message[student_code]",
+        "message": "Function 'missing_function' wasn't found in the student code"
+      }
+    ]
+  }
+}

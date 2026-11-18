@@ -21,22 +21,8 @@ import os
 from typing import Any
 
 from .fixture import _SandboxBase
-
-
-def _format_value(value: Any, *, max_len: int = 200) -> str:
-    """Return a repr of *value*, truncated for readability."""
-    text = repr(value)
-    if len(text) > max_len:
-        text = text[: max_len - 3] + "..."
-    return text
-
-
-def _format_call(func_name: str, args: tuple[Any, ...], kwargs: dict[str, Any] | None) -> str:
-    """Format ``func_name(args, kwargs)`` for display."""
-    parts: list[str] = [_format_value(a, max_len=60) for a in args]
-    if kwargs:
-        parts.extend(f"{k}={_format_value(v, max_len=60)}" for k, v in kwargs.items())
-    return f"{func_name}({', '.join(parts)})"
+from .utils import format_call
+from .utils import format_value
 
 
 def _build_failure_lines(
@@ -50,8 +36,8 @@ def _build_failure_lines(
     lines: list[str] = []
     if description:
         lines.append(f"Checking: {description}")
-    lines.append(f"Expected output: {_format_value(expected)}")
-    lines.append(f"Your code output: {_format_value(actual)}")
+    lines.append(f"Expected output: {format_value(expected)}")
+    lines.append(f"Your code output: {format_value(actual)}")
     if msg:
         lines.append(msg)
     else:
@@ -188,6 +174,109 @@ def assert_false(
     raise AssertionError(msg or "Expected the condition to be false, but it was true.")
 
 
+def assert_plot_equal(
+    plot: Any,
+    expected: Any,
+    *,
+    name: str = "your plot",
+    rtol: float = 1e-5,
+    atol: float = 1e-8,
+    check_scales: bool = True,
+    check_data: bool = True,
+    ordered: bool = False,
+    allow_extra: bool = False,
+    check_labels: bool = False,
+    check_titles: bool = False,
+    check_legend: bool = False,
+    check_limits: bool = False,
+    check_styles: bool = False,
+    check_texts: bool = False,
+    msg: str | None = None,
+) -> None:
+    """Assert that a student's matplotlib plot matches a reference plot.
+
+    Both plots can be a ``Figure`` or an ``Axes``.  ``sandbox.query`` returns
+    a student's plot as a ``Figure``; the reference is usually drawn by the
+    test itself.  Subplots are compared in order.
+
+    By default this checks the number of subplots, the axis scales, and the
+    data in each line, ``axhline`` and ``axvline`` line, scatter plot and bar
+    plot, which must have the same number of each kind.  Series can be in any order, and a line also matches
+    when its points are in reverse order.  Scatter points and bars can be in
+    any order.  Numbers are compared with ``numpy.allclose``.
+
+    Parameters
+    ----------
+    plot:
+        The student's plot.  Anything other than a ``Figure`` or ``Axes``
+        fails the assertion.
+    expected:
+        The reference plot.
+    name:
+        What to call the student's plot in failure messages.
+    rtol, atol:
+        Tolerances for comparing data and axis limits.
+    check_scales:
+        Compare the x and y axis scales, such as ``"linear"`` and ``"log"``.
+    check_data:
+        Compare the data in lines, scatter plots and bar plots.
+    ordered:
+        Require lines, scatter plots, bar plots and legend labels to be in
+        the same order as in the reference.
+    allow_extra:
+        Allow the student's plot to have more lines, scatter plots, bar
+        plots, text or annotations than the reference.
+    check_labels:
+        Compare the x and y axis labels exactly.
+    check_titles:
+        Compare the titles of each subplot and the figure exactly.
+    check_legend:
+        Compare the legend's labels and title, or that neither plot has a
+        legend.
+    check_limits:
+        Compare the x and y axis limits.
+    check_styles:
+        Compare line colors, line styles and markers, scatter point colors,
+        and bar colors and orientation.
+    check_texts:
+        Compare the strings of ``text`` and ``annotate`` labels, and the point
+        each annotation points at.  The position of plain text isn't compared.
+        Extra text is allowed with *allow_extra*.
+    msg:
+        Optional message to show instead of the description of the
+        difference.
+
+    Raises
+    ------
+    AssertionError
+        Describing the first difference found.
+    TypeError
+        When *expected* is not a ``Figure`` or ``Axes``.
+    """
+    # matplotlib is an optional dependency, so only import it when a plot is checked.
+    from .plot_checks import plot_mismatch  # noqa: PLC0415
+
+    mismatch = plot_mismatch(
+        plot,
+        expected,
+        name=name,
+        rtol=rtol,
+        atol=atol,
+        check_scales=check_scales,
+        check_data=check_data,
+        ordered=ordered,
+        allow_extra=allow_extra,
+        check_labels=check_labels,
+        check_titles=check_titles,
+        check_legend=check_legend,
+        check_limits=check_limits,
+        check_styles=check_styles,
+        check_texts=check_texts,
+    )
+    if mismatch is not None:
+        raise AssertionError(msg or mismatch)
+
+
 # ---------------------------------------------------------------------------
 # Sandbox-integrated assertions (call student function + compare result)
 # ---------------------------------------------------------------------------
@@ -247,7 +336,7 @@ def assert_fn_equal(
     """
     call_kwargs = kwargs or {}
     actual = sandbox.query_function(func_name, *args, query_timeout=query_timeout, **call_kwargs)
-    call_description = description or _format_call(func_name, args, kwargs)
+    call_description = description or format_call(func_name, args, kwargs)
     assert_equal(actual, expected, msg=msg, description=call_description)
     return actual
 
@@ -277,6 +366,6 @@ def assert_fn_approx_equal(
     """
     call_kwargs = kwargs or {}
     actual = sandbox.query_function(func_name, *args, query_timeout=query_timeout, **call_kwargs)
-    call_description = description or _format_call(func_name, args, kwargs)
+    call_description = description or format_call(func_name, args, kwargs)
     assert_approx_equal(actual, expected, rtol=rtol, atol=atol, msg=msg, description=call_description)
     return actual

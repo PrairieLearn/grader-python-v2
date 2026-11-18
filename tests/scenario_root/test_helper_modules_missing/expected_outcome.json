@@ -1,0 +1,13 @@
+{
+  "expected_data_object": {
+    "gradable": false,
+    "message": "The autograder encountered an internal error.",
+    "tests": [
+      {
+        "test_id": "test_helper_modules_missing.py::test_query[student_code]",
+        "outcome": "error",
+        "message": "Autograder configuration error in helper_modules: can't use 'helper_function':"
+      }
+    ]
+  }
+}

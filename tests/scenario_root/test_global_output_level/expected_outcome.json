@@ -4,7 +4,7 @@
     "tests": [
       {
         "max_points": 2,
-        "name": "Test add (global friendly)",
+        "name": "Test add (global message)",
         "points_frac": 1.0,
         "points": 2.0,
         "test_id": "test_global_output_level.py::test_fn_equal[student_code]",
@@ -12,8 +12,8 @@
       },
       {
         "max_points": 2,
-        "message": "Checking: add(2, 3)\nExpected output: 5\nYour code output: -1\nThe expected and actual output do not match.",
-        "name": "Test add (global friendly)",
+        "message": "Student code grading failed with an exception: AssertionError\nException Message: Checking: add(2, 3)",
+        "name": "Test add (global message)",
         "points_frac": 0.0,
         "points": 0.0,
         "test_id": "test_global_output_level.py::test_fn_equal[student_code_wrong]",
@@ -21,7 +21,7 @@
       },
       {
         "max_points": 1,
-        "name": "Test variable x (global friendly)",
+        "name": "Test variable x (global message)",
         "points_frac": 1.0,
         "points": 1.0,
         "test_id": "test_global_output_level.py::test_equal_variable[student_code]",
@@ -29,8 +29,8 @@
       },
       {
         "max_points": 1,
-        "message": "Checking: variable 'x'\nExpected output: 42\nYour code output: 99\nThe expected and actual output do not match.",
-        "name": "Test variable x (global friendly)",
+        "message": "Student code grading failed with an exception: AssertionError\nException Message: Checking: variable 'x'",
+        "name": "Test variable x (global message)",
         "points_frac": 0.0,
         "points": 0.0,
         "test_id": "test_global_output_level.py::test_equal_variable[student_code_wrong]",

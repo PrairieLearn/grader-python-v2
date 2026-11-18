@@ -1,0 +1,85 @@
+{
+  "expected_data_object": {
+    "score": 0.7777777777777778,
+    "tests": [
+      {
+        "max_points": 1,
+        "name": "query_axes",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_plain_matplotlib.py::test_query_axes[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "query_figure",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_plain_matplotlib.py::test_query_figure[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "query_function",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_plain_matplotlib.py::test_function_returning_axes_works_with_plot_tester[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "subplots",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_plain_matplotlib.py::test_function_returning_subplots[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "rejected_raw",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_plain_matplotlib.py::test_rejected_plot_keeps_sandbox_usable[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "rejected_message",
+        "points": 0.0,
+        "points_frac": 0.0,
+        "outcome": "failed",
+        "test_id": "test_plain_matplotlib.py::test_rejected_plot_shows_clear_message[student_code]",
+        "message": "errorbar plots aren't supported"
+      },
+      {
+        "max_points": 1,
+        "name": "add_image",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_plain_matplotlib.py::test_add_image[student_code]",
+        "images": [
+          "Your plot",
+          null
+        ]
+      },
+      {
+        "max_points": 1,
+        "name": "assert_plot_equal",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "outcome": "passed",
+        "test_id": "test_plain_matplotlib.py::test_assert_plot_equal[student_code]"
+      },
+      {
+        "max_points": 1,
+        "name": "assert_plot_equal_message",
+        "points": 0.0,
+        "points_frac": 0.0,
+        "outcome": "failed",
+        "test_id": "test_plain_matplotlib.py::test_assert_plot_equal_message[student_code]",
+        "message": "Expected a log scale on the y-axis of your plot, but found a linear scale."
+      }
+    ]
+  }
+}

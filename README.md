@@ -18,6 +18,9 @@ pip install pytest-prairielearn-grader[notebook]
 
 See [quick_start.md](quick_start.md) for a full tutorial with PrairieLearn integration examples.
 
+To convert a question from the legacy Python grader (`prairielearn/grader-python`), follow
+[converting.md](converting.md). It's written so that you can hand it to an AI coding agent.
+
 ## Key Features
 
 ### Sandboxed Execution
@@ -31,28 +34,28 @@ Student code runs in a separate subprocess via Unix sockets, providing:
 
 ### Student-Friendly Feedback Mode
 
-Control how much information students see when their code fails. Use `@pytest.mark.output(level=...)` per test, or set `output_level` globally in your `ConfigObject`:
+Control how much information students see when their code fails. The default is `"friendly"`. Use `@pytest.mark.output(level=...)` per test, or set `output_level` globally in your `ConfigObject`:
 
 ```python
 from pytest_prairielearn_grader import ConfigObject
 
 autograder_config = ConfigObject(
-    output_level="friendly",  # Global default for all tests
+    output_level="traceback",  # Global default for all tests
 )
 ```
 
 **Output levels:**
 | Level | Shows |
 |-------|-------|
+| `"friendly"` | Only the exception message, with no class name *(default)*. If a call to a student function raised the error, this includes the traceback from the student's code. |
 | `"none"` | Exception class name only (e.g., `AssertionError`) |
-| `"message"` | Exception name + first line of message *(default)* |
+| `"message"` | Exception name + first line of message |
 | `"traceback"` | Full exception with traceback |
-| `"friendly"` | Only the exception message text — no class name, no traceback |
 
 Per-test markers override the global setting:
 
 ```python
-@pytest.mark.output(level="friendly")
+@pytest.mark.output(level="traceback")
 @pytest.mark.grading_data(name="Test add", points=5)
 def test_add(sandbox: StudentFixture) -> None:
     assert_fn_equal(sandbox, "add", args=(2, 3), expected=5)
@@ -65,7 +68,6 @@ Student-friendly assertion functions that produce clean, readable failure messag
 ```python
 from pytest_prairielearn_grader.assertions import assert_equal, assert_fn_equal
 
-@pytest.mark.output(level="friendly")
 @pytest.mark.grading_data(name="Test calculation", points=5)
 def test_calc(sandbox: StudentFixture) -> None:
     # Produces: "Checking: add(2, 3)\nExpected output: 5\nYour code output: 4\n..."
@@ -78,6 +80,23 @@ Available helpers:
 - `assert_fn_equal(sandbox, func_name, args=..., expected=...)` — call + compare
 - `assert_fn_approx_equal(sandbox, func_name, args=..., expected=...)` — call + approx compare
 - `assert_true(condition)` / `assert_false(condition)` — boolean checks
+- `assert_plot_equal(plot, expected)` — compare a matplotlib plot with a reference plot
+
+### Partial Credit Across Inputs
+
+Check each input in a `subtests.test()` block, using pytest's built-in `subtests` fixture. The
+test gets the fraction of blocks that passed, and the student sees the first few failures:
+
+```python
+@pytest.mark.grading_data(name="Check random values", points=3)
+def test_random_values(sandbox: StudentFixture, subtests: pytest.Subtests) -> None:
+    for n in [2, 3, 5, 8, 13]:
+        with subtests.test():
+            assert_fn_equal(sandbox, "fib", args=(n,), expected=fib(n))
+```
+
+After a call to student code times out, the sandbox stops answering queries, so the remaining
+inputs fail without running. See [Checking Many Inputs](quick_start.md#checking-many-inputs).
 
 ### Ungradable Submission Detection
 
@@ -102,7 +121,7 @@ from pytest_prairielearn_grader import ConfigObject
 autograder_config = ConfigObject(
     sandbox_timeout=2.0,
     import_whitelist=["numpy", "math"],
-    builtin_whitelist=["len", "range", "sum"],
+    builtin_whitelist=["getattr"],
     output_level="friendly",
     syntax_errors_ungradable=True,
     starting_vars={"coefficient": 10},

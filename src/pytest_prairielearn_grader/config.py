@@ -1,9 +1,25 @@
 """Configuration dataclass for pytest-prairielearn-grader."""
 
+import keyword
 from dataclasses import dataclass
 from dataclasses import field
+from pathlib import PurePosixPath
+from pathlib import PureWindowsPath
 from typing import Any
 from typing import Literal
+
+
+def _is_plain_relative_path(name: str) -> bool:
+    """Whether name is a relative path to a file that stays inside the folder it's resolved against.
+
+    Entries always use "/", whatever the OS, so a config means the same thing on every machine.
+    Backslashes and drives are rejected because on Windows they'd be a separator or an anchor.
+    """
+    if not name.strip() or "\\" in name or PureWindowsPath(name).drive:
+        return False
+    path = PurePosixPath(name)
+    # PurePosixPath drops "." and empty parts, so "." and "" have no parts left.
+    return not path.is_absolute() and bool(path.parts) and ".." not in path.parts
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -57,11 +73,54 @@ class ConfigObject:
     import_blacklist: list[str] | None = None
     """List of Python modules that student code is prohibited from importing.
 
-    Modules in the blacklist are always blocked, even if in the whitelist.
+    Modules in the blacklist are always blocked, even if in the whitelist, and so are their
+    submodules: "os" also blocks `import os.path`.
+    An entry can also name a function in a module, such as "numpy.linalg.inv". The function then
+    raises a RuntimeError when it's called, however student code reached it, and importing it by
+    name is blocked. Setup code and helper modules can't call it either.
     Can be combined with import_whitelist for fine-grained control.
     Default blocks dangerous system operations: ["os", "sys", "subprocess", "pathlib", "shutil"].
 
-    Example: ["requests", "socket"]
+    Example: ["requests", "socket", "numpy.linalg.inv"]
+    """
+
+    helper_modules: list[str] | None = None
+    """Modules from the tests folder that setup code, leading code and student code can import.
+
+    Each entry is a plain module name, so "helper_function" loads helper_function.py from
+    the folder that holds leading_code.py. Packages, dots, paths and the ".py" suffix aren't
+    accepted. Importing anything else in that folder still fails, because the folder isn't
+    added to the import path.
+
+    Listed modules don't need to be in import_whitelist. Listing one that import_blacklist
+    also blocks is a configuration error. A helper module runs in the sandbox with the same
+    builtins and import rules as student code.
+
+    In workspace mode, a listed name is reserved: a student file or folder with that name fails
+    the submission with a message asking the student to rename it. A helper module keeps these
+    restricted builtins, unlike the student's own modules.
+
+    Students can read everything in a helper module, so it must not contain answers.
+
+    Example: ["helper_function"]
+    """
+
+    data_files: list[str] | None = None
+    """Files from the tests folder that setup code, leading code and student code can read by relative path.
+
+    Each entry is a path relative to the folder that holds leading_code.py, such as
+    "pagerank_large.txt" or "data/points.csv". Absolute paths and ".." aren't accepted.
+
+    The sandbox starts in a fresh folder that holds a copy of each listed file at the same
+    relative path, so ``np.loadtxt("pagerank_large.txt")`` works as it does in a Jupyter
+    workspace. Student code can't change the copies, and changes to them couldn't reach the
+    originals anyway, which tests read through the ``tests_dir`` fixture. Without this setting
+    the sandbox's starting folder isn't changed.
+
+    A listed file that doesn't exist makes the submission ungradable, with a message for the
+    instructor. Students can read the listed files, so they must not contain answers.
+
+    Example: ["pagerank_large.txt"]
     """
 
     builtin_whitelist: list[str] | None = None
@@ -194,12 +253,14 @@ class ConfigObject:
     Individual tests can override this with ``@pytest.mark.output(level="...")``.
 
     Levels:
+    - ``"friendly"``: Show only the exception message, with no class name
+      (default when None). Designed for use with the ``assert_equal`` /
+      ``assert_fn_equal`` helpers to produce clean, student-readable output.
+      If a call to a student function raised the error, the message includes
+      the traceback from the student's code.
     - ``"none"``: Show only the exception class name (e.g., ``AssertionError``).
-    - ``"message"``: Show exception name + first line of message (default when None).
+    - ``"message"``: Show exception name + first line of message.
     - ``"traceback"``: Show exception name + message + full traceback.
-    - ``"friendly"``: Show only the exception message text with no traceback or
-      class name. Designed for use with the ``assert_equal`` / ``assert_fn_equal``
-      helpers to produce clean, student-readable output.
 
     When None, the plugin default of ``"message"`` is used unless overridden
     by a per-test ``@pytest.mark.output(level=...)`` marker.
@@ -230,6 +291,28 @@ class ConfigObject:
             for module_name in self.import_blacklist:
                 if not isinstance(module_name, str) or not module_name.strip():
                     raise ValueError(f"import_blacklist must contain non-empty strings, got: {module_name!r}")
+
+        # Validate helper_modules contains plain module names
+        if self.helper_modules is not None:
+            if not isinstance(self.helper_modules, list):
+                raise TypeError(f"helper_modules must be a list, got {type(self.helper_modules).__name__}")
+            if not self.helper_modules:
+                raise ValueError("helper_modules cannot be empty (use None for no helper modules)")
+            for module_name in self.helper_modules:
+                if not isinstance(module_name, str) or not module_name.isidentifier() or keyword.iskeyword(module_name):
+                    raise ValueError(f"helper_modules must contain plain module names without dots, paths or '.py', got: {module_name!r}")
+
+        # Validate data_files contains relative paths that stay inside the tests folder
+        if self.data_files is not None:
+            if not isinstance(self.data_files, list):
+                raise TypeError(f"data_files must be a list, got {type(self.data_files).__name__}")
+            if not self.data_files:
+                raise ValueError("data_files cannot be empty (use None for no data files)")
+            for file_name in self.data_files:
+                if not isinstance(file_name, str) or not _is_plain_relative_path(file_name):
+                    raise ValueError(f"data_files must contain relative paths inside the tests folder, without '..', got: {file_name!r}")
+            if len({PurePosixPath(name) for name in self.data_files}) != len(self.data_files):
+                raise ValueError(f"data_files lists the same file more than once: {self.data_files!r}")
 
         # Validate builtin_whitelist contains non-empty strings
         if self.builtin_whitelist is not None:
@@ -297,9 +380,7 @@ class ConfigObject:
         # Validate output_level
         valid_output_levels = ("none", "message", "traceback", "friendly")
         if self.output_level is not None and self.output_level not in valid_output_levels:
-            raise ValueError(
-                f"output_level must be one of {valid_output_levels} or None, got: {self.output_level!r}"
-            )
+            raise ValueError(f"output_level must be one of {valid_output_levels} or None, got: {self.output_level!r}")
 
     def to_dict(self) -> dict[str, Any]:
         """

@@ -11,6 +11,22 @@ import dill
 import pytest
 
 
+def format_value(value: Any, *, max_len: int = 200) -> str:
+    """Return a repr of *value*, truncated for readability."""
+    text = repr(value)
+    if len(text) > max_len:
+        text = text[: max_len - 3] + "..."
+    return text
+
+
+def format_call(func_name: str, args: tuple[Any, ...], kwargs: dict[str, Any] | None) -> str:
+    """Format ``func_name(args, kwargs)`` for display."""
+    parts: list[str] = [format_value(a, max_len=60) for a in args]
+    if kwargs:
+        parts.extend(f"{k}={format_value(v, max_len=60)}" for k, v in kwargs.items())
+    return f"{func_name}({', '.join(parts)})"
+
+
 class GradingOutputLevel(StrEnum):
     ExceptionName = "none"
     ExceptionMessage = "message"
@@ -33,8 +49,8 @@ class FunctionStatusCode(StrEnum):
     Status codes for a function execution.
 
     A timeout indicates that the function call did not produce a response within
-    the requested interval. Callers must stop issuing requests on that sandbox
-    after receiving this status.
+    the requested interval. After this status, every later query on that sandbox
+    raises SandboxStopped.
 
     NOT_SERIALIZABLE means the function finished but its return value can't be sent
     to the grader. The sandbox can still be used after this status.
@@ -165,6 +181,7 @@ class ProcessStartRequest(TypedDict):
     starting_vars: dict[str, Any] | None
     builtin_whitelist: list[str] | None
     names_for_user_list: list[str] | None
+    helper_modules: dict[str, str] | None  # Module name to source code
 
 
 class WorkspaceStartRequest(TypedDict):
@@ -178,6 +195,7 @@ class WorkspaceStartRequest(TypedDict):
     starting_vars: dict[str, Any] | None
     builtin_whitelist: list[str] | None
     names_for_user_list: list[str] | None
+    helper_modules: dict[str, str] | None  # Module name to source code
 
 
 class ProcessStartResponse(TypedDict):
@@ -229,7 +247,7 @@ def deserialize_object_unsafe(base64_string: str) -> object:
     dilled_bytes = base64.b64decode(base64_encoded_bytes)
 
     # 3. Deserialize the object using dill
-    return dill.loads(dilled_bytes)
+    return dill.loads(dilled_bytes)  # noqa: S301
 
 
 def get_builtins(builtin_whitelist: list[str] | None) -> dict[str, Any]:
@@ -279,6 +297,29 @@ def get_builtins(builtin_whitelist: list[str] | None) -> dict[str, Any]:
         "min",
         "max",
         "map",
+        # Not in RestrictedPython's list, but they don't give student code anything that plain Python
+        # syntax doesn't. Courses commonly use them, and without them, correct solutions fail with a
+        # NameError.
+        "all",
+        "any",
+        "ascii",
+        "bin",
+        "bytearray",
+        "classmethod",
+        "Ellipsis",
+        "filter",
+        "format",
+        "frozenset",
+        "iter",
+        "next",
+        "NotImplemented",
+        "object",
+        "property",
+        "reversed",
+        "staticmethod",
+        "sum",
+        "super",
+        "type",
     )
 
     _safe_exceptions = (
@@ -353,7 +394,7 @@ def drop_privileges(user_name: str) -> None:
         raise NotImplementedError("Dropping privileges is not supported on Windows.")
 
     # pwd module is only available on Unix systems
-    import pwd
+    import pwd  # noqa: PLC0415
 
     try:
         # Get the UID and GID for the target user (e.g., 'nobody')
@@ -361,14 +402,19 @@ def drop_privileges(user_name: str) -> None:
         target_uid = pwnam.pw_uid
         target_gid = pwnam.pw_gid
     except KeyError:
-        raise ValueError(f"User '{user_name}' not found.")
+        raise ValueError(f"User '{user_name}' not found.") from None
 
-    # 1. Set the real and effective GID
+    # 1. Drop the supplementary groups inherited from root. Without this the sandbox keeps root's
+    # groups (including group 0), so group permissions wouldn't restrict it. This must happen while
+    # still root, before setuid.
+    os.setgroups([])
+
+    # 2. Set the real and effective GID
     # NOTE: Set GID before UID, as changing UID may restrict GID changes
     os.setgid(target_gid)
     os.setegid(target_gid)
 
-    # 2. Set the real and effective UID
+    # 3. Set the real and effective UID
     os.setuid(target_uid)
     os.seteuid(target_uid)
 
@@ -397,4 +443,4 @@ def get_output_level_marker(marker: pytest.Mark | None, config_level: str | None
         except ValueError:
             pass
 
-    return GradingOutputLevel.ExceptionMessage
+    return GradingOutputLevel.Friendly

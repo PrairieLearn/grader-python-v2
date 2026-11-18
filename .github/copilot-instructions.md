@@ -141,9 +141,18 @@ result = sandbox.query_function("student_func", arg1, arg2, timeout=5)
 # In setup_code.py, define variables; they're injected if in names_for_user
 ```
 
+`ConfigObject(helper_modules=["helper_function"])` lets setup, leading and student code import
+`helper_function.py` from the tests folder, which isn't otherwise on the import path. Students can read
+these modules, so they must not contain answers. In workspace mode, their names are reserved: a student
+file or folder with one fails the submission with a message asking the student to rename it.
+
+`ConfigObject(data_files=["pagerank_large.txt"])` starts the sandbox in a new folder holding read-only
+copies of the listed tests-folder files, so code in the sandbox can read them by relative path. Tests read
+the originals through the `tests_dir` fixture. A missing listed file makes the submission ungradable.
+
 ### 5. Serialization
 
-- Student-to-grader values (`query`, `query_function`) are JSON only, through `to_json` / `from_json`
+- Student-to-grader values (`query`, `query_function`) are JSON only, through `to_json` / `from_json`, including numpy arrays, pandas DataFrames and matplotlib plots (see [src/pytest_prairielearn_grader/matplotlib_json.py](src/pytest_prairielearn_grader/matplotlib_json.py))
 - Grader-to-student function arguments use base64-encoded `dill`
 - `query_setup` sends JSON-representable values as JSON when queried. Other values use base64-encoded `dill`, encoded and sent once before student code starts. The grader must not deserialize `dill` from anything sent after that point
 - See [src/pytest_prairielearn_grader/json_utils.py](src/pytest_prairielearn_grader/json_utils.py) for custom serialization
