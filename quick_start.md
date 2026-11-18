@@ -827,6 +827,33 @@ def test_student_plot(sandbox: StudentFixture, feedback: FeedbackFixture) -> Non
 - **Size:** PrairieLearn limits the whole `results.json` to 1 MB. A typical plot is tens of
   kilobytes, but don't add an image in every case of a test with many parameters.
 
+The test can also draw a plot of its own and show it, such as the expected plot, or a plot of
+values that student code returned for a question that doesn't ask for a plot. Draw it on a new
+`Figure` instead of with `pyplot`, so that one test's plot doesn't end up in another test's figure:
+
+```python
+from matplotlib.figure import Figure
+
+
+@pytest.mark.grading_data(name="Simulation", points=5)
+def test_simulation(sandbox: StudentFixture, feedback: FeedbackFixture) -> None:
+    times = np.linspace(0, 10, 50)
+    positions = sandbox.query_function("simulate", times)
+    expected = expected_positions(times)
+
+    figure = Figure()
+    axes = figure.subplots()
+    axes.plot(times, positions, label="Your values")
+    axes.plot(times, expected, "--", label="Expected values")
+    axes.set_xlabel("Time")
+    axes.legend()
+    feedback.add_image(figure, label="Your values and the expected values")
+
+    assert_true(np.allclose(positions, expected), msg="The positions aren't correct")
+```
+
+To show an image made some other way, pass the bytes of a PNG file to `add_image`.
+
 The grader automatically serializes/deserializes:
 
 - Matplotlib `Axes` and `Figure` values (received as a `Figure`)
