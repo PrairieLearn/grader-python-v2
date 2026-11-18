@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import os
 import sys
 from collections.abc import Iterable
@@ -68,6 +69,32 @@ class SubtestResult:
     label: str | None
     outcome: str
     excinfo: pytest.ExceptionInfo[BaseException] | None
+    # The `weight` keyword argument. Newer pytest versions keep its repr, such as "2", instead.
+    weight: object = None
+
+
+def get_subtest_weights(subtests: list[SubtestResult]) -> list[float]:
+    """
+    Each subtest's weight from `subtests.test(weight=...)`, or 1 without one. Raises ValueError,
+    with a message for the instructor, if a weight isn't a non-negative number or they're all 0.
+    """
+    weights = []
+    for subtest in subtests:
+        if subtest.weight is None:
+            weights.append(1.0)
+            continue
+        weight = math.nan
+        if isinstance(subtest.weight, int | float | str) and not isinstance(subtest.weight, bool):
+            try:
+                weight = float(subtest.weight)
+            except ValueError:
+                pass
+        if not math.isfinite(weight) or weight < 0:
+            raise ValueError(f"A subtest's weight must be a non-negative int or float, not {subtest.weight}.")
+        weights.append(weight)
+    if sum(weights) == 0:
+        raise ValueError("At least one subtest needs a weight greater than 0.")
+    return weights
 
 
 def format_failure(
@@ -1048,7 +1075,12 @@ class ResultCollectorPlugin:
         result = self.pending_calls.pop(report.nodeid)
         if isinstance(report, pytest.SubtestReport):
             self.subtest_results.setdefault(report.nodeid, []).append(
-                SubtestResult(label=report.context.msg, outcome=report.outcome, excinfo=result.call.excinfo)
+                SubtestResult(
+                    label=report.context.msg,
+                    outcome=report.outcome,
+                    excinfo=result.call.excinfo,
+                    weight=report.context.kwargs.get("weight"),
+                )
             )
         else:
             self.collected_results[report.nodeid] = result
@@ -1125,8 +1157,13 @@ class ResultCollectorPlugin:
             logger.debug(f"Grading output level set to: {output_level}")
 
             subtests = self.subtest_results.get(nodeid, [])
+            subtest_weights: list[float] | None = None
             if subtests:
-                feedback_obj.add_message(format_subtest_results(subtests, output_level))
+                try:
+                    subtest_weights = get_subtest_weights(subtests)
+                    feedback_obj.add_message(format_subtest_results(subtests, output_level))
+                except ValueError as e:
+                    feedback_obj.add_message(str(e))
 
             # If the test failed (in any phase), add the exception message to the feedback.
             # A test whose subtests failed is also marked failed, but without exception info.
@@ -1173,13 +1210,18 @@ class ResultCollectorPlugin:
                     # For now, we raise an error for unexpected outcomes
                     raise ValueError(f"Unexpected outcome '{outcome}' for test '{nodeid}'.")
 
-            # A test with subtests gets the fraction of them that passed, and skipped subtests count
-            # as failed. pytest marks the test failed when any subtest fails, so check whether the
-            # test body itself raised instead. If it did, the score from above (0 or set_score) stays.
+            # A test with subtests gets the weighted fraction of them that passed, and skipped
+            # subtests count as failed. pytest marks the test failed when any subtest fails, so check
+            # whether the test body itself raised instead. If it did, the score from above (0 or
+            # set_score) stays. A test with an invalid weight gets 0.
             if subtests and report.when == "call" and call.excinfo is None and not feedback_obj.final_score_override:
-                passed = sum(subtest.outcome == "passed" for subtest in subtests)
-                res_obj["points_frac"] = passed / len(subtests)
-                res_obj["outcome"] = "passed" if passed == len(subtests) else "failed"
+                if subtest_weights is None:
+                    res_obj["points_frac"] = 0.0
+                    res_obj["outcome"] = "failed"
+                else:
+                    passed_weight = sum(w for subtest, w in zip(subtests, subtest_weights, strict=True) if subtest.outcome == "passed")
+                    res_obj["points_frac"] = passed_weight / sum(subtest_weights)
+                    res_obj["outcome"] = "passed" if all(subtest.outcome == "passed" for subtest in subtests) else "failed"
 
             res_obj["points"] = res_obj["points_frac"] * res_obj["max_points"]
             final_results.append(res_obj)

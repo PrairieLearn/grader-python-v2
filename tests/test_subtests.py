@@ -147,6 +147,37 @@ def run_grader(pytester: pytest.Pytester, tests: str) -> dict[str, dict[str, Any
             ["first: nope", "second:\nChecking: double(3)"],
             id="labels",
         ),
+        pytest.param(
+            """
+            def test_case(sandbox, subtests):
+                for x, weight in [(1, 1), (2, 2), (3, 1)]:
+                    with subtests.test(weight=weight):
+                        assert_fn_equal(sandbox, "double", args=(x,), expected=2 * x)
+            """,
+            3 / 4,
+            ["2/3 checks passed.", "Checking: double(3)"],
+            id="weights",
+        ),
+        pytest.param(
+            """
+            def test_case(sandbox, subtests):
+                with subtests.test(weight="heavy"):
+                    assert_fn_equal(sandbox, "double", args=(1,), expected=2)
+            """,
+            0.0,
+            ["A subtest's weight must be a non-negative int or float, not"],
+            id="invalid_weight",
+        ),
+        pytest.param(
+            """
+            def test_case(sandbox, subtests):
+                with subtests.test(weight=0):
+                    assert_fn_equal(sandbox, "double", args=(1,), expected=2)
+            """,
+            0.0,
+            ["At least one subtest needs a weight greater than 0."],
+            id="all_zero_weights",
+        ),
     ],
 )
 def test_subtests_score(pytester: pytest.Pytester, test_case: str, points_frac: float, messages: list[str]) -> None:
@@ -226,3 +257,20 @@ def test_timeout_reported_by_student_process_stops_sandbox(pytester: pytest.Pyte
     assert result["points_frac"] == pytest.approx(0.25)
     assert "double(4) timed out after 0.2 seconds." in result["message"]
     assert "The remaining 2 checks didn't run because double(4) timed out after 0.2 seconds." in result["message"]
+
+
+def test_zero_weight_failure_keeps_full_points(pytester: pytest.Pytester) -> None:
+    result = run_grader(
+        pytester,
+        """
+        @pytest.mark.grading_data(name="case", points=1)
+        def test_case(sandbox, subtests):
+            for x, weight in [(1, 1), (3, 0)]:
+                with subtests.test(weight=weight):
+                    assert_fn_equal(sandbox, "double", args=(x,), expected=2 * x)
+        """,
+    )["case"]
+
+    assert result["points_frac"] == 1
+    assert result["outcome"] == "failed"
+    assert "Checking: double(3)" in result["message"]
