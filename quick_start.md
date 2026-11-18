@@ -567,6 +567,18 @@ test's score is the fraction of blocks that passed:
   `feedback.set_score`.
 - `feedback.set_score_final` replaces the fraction.
 
+To make some blocks count for more, pass a `weight`, which is 1 by default:
+
+```python
+for n, weight in [(2, 1), (10, 1), (29, 2)]:
+    with subtests.test(weight=weight):
+        assert_fn_equal(sandbox, "fib", args=(n,), expected=fib(n))
+```
+
+The score is then the weight of the blocks that passed divided by the total weight: here, passing
+only `fib(29)` gives half the points. Weights are non-negative ints or floats. A block with weight 0
+is still checked and shown, but doesn't change the score.
+
 The test's message starts with how many blocks passed, such as `7/10 checks passed.`, followed by
 the messages of the first 5 failed blocks. Passed blocks aren't listed. Pass a label to show it
 before a block's message, such as `subtests.test(f"last_element({lst})")`. The `assert_fn_*`
