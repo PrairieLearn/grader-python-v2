@@ -383,17 +383,34 @@ So a timeout fails the rest of the test, and with a [module-scoped sandbox](#mod
 the later tests that use it too. In a [subtests loop](#checking-many-inputs), the inputs before the
 timeout keep their credit.
 
-#### 5. Query Setup Variables
+### 5. Query Setup Code Values
 
 ```python
-x = sandbox.query_setup("x")
+value = sandbox.query_setup("variable_name")
 ```
 
-Retrieves a variable defined by `setup_code.py`, whether or not it's in `names_for_user`. The value
-comes from the same sandbox as the student's code, so a random value matches the one the student's
-code received.
+Returns a variable from `setup_code.py`, including ones that aren't passed to the student in `names_for_user`.
+Values can be functions and other objects, as long as JSON or `dill` can serialize them:
 
-**Note**: Values sent back from the sandbox must be serializable. Supported types include: `int`, `float`, `str`, `list`, `dict`, `bool`, `None`, numpy arrays, pandas DataFrames,
+```python
+@pytest.mark.grading_data(name="Check Answer", points=2)
+def test_answer(sandbox: StudentFixture) -> None:
+    expected = sandbox.query_setup("compute_expected")(sandbox.query_setup("x"))
+    assert sandbox.query("answer") == expected
+```
+
+How a value reaches your test depends on its type:
+
+| Value | How it's sent | Can student code change it? |
+| --- | --- | --- |
+| Numbers, strings, `bool`, `None`, lists and string-keyed dicts of these, numeric NumPy arrays and scalars, pandas DataFrames | As JSON, only when queried | It could, so don't rely on these values if students are working around the sandbox. It can't run code in the grader this way |
+| Everything else, such as functions, classes, tuples, sets and other objects | Encoded with `dill` before student code runs | No |
+
+- **Large values:** prefer the JSON types for large data, because they add nothing to sandbox start time. Other values are encoded every time a sandbox starts, whether or not they're queried. Pass a longer `query_timeout` when querying large values, for example `sandbox.query_setup("data", query_timeout=10.0)`. The default is 1 second.
+- **Each call returns a new copy.** Changing it doesn't affect the sandbox or later calls.
+- **Missing variables** raise a `NameError`.
+- **Values that can't be serialized**, such as generators, raise a `TypeError` that names the variable. Other setup variables still work.
+
 and matplotlib plots (see [Testing Matplotlib Plots](#testing-matplotlib-plots)).
 
 ### Checking Answers

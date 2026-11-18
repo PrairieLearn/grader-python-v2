@@ -20,6 +20,7 @@ from multiprocessing.connection import Connection
 from typing import Any
 
 from pytest_prairielearn_grader.json_utils import from_server_json
+from pytest_prairielearn_grader.json_utils import is_json_transportable
 
 # TODO make it so that other files in this package cannot import from this one
 # ask Gemini how to do it
@@ -34,6 +35,8 @@ from pytest_prairielearn_grader.utils import ServerFailureResponse
 from pytest_prairielearn_grader.utils import ServerStatusCode
 from pytest_prairielearn_grader.utils import SetupQueryRequest
 from pytest_prairielearn_grader.utils import SetupQueryResponse
+from pytest_prairielearn_grader.utils import SetupSnapshotEntry
+from pytest_prairielearn_grader.utils import SetupSnapshotMessage
 from pytest_prairielearn_grader.utils import StudentFunctionRequest
 from pytest_prairielearn_grader.utils import StudentFunctionResponse
 from pytest_prairielearn_grader.utils import StudentQueryRequest
@@ -198,6 +201,30 @@ def student_function_runner(
             "traceback": None,
         }
         return not_serializable_response
+
+
+def encode_setup_variables(local_vars: dict[str, Any]) -> dict[str, SetupSnapshotEntry]:
+    """
+    Dill-encode the setup variables that JSON can't represent, such as functions.
+
+    Other variables aren't encoded here, so large data doesn't slow down starting the sandbox.
+    They're sent as JSON if they're queried. Each variable is encoded on its own so that one
+    value dill can't handle only fails a query for that value, not the whole sandbox.
+    """
+    encoded: dict[str, SetupSnapshotEntry] = {}
+    for name, value in local_vars.items():
+        if is_json_transportable(value):
+            continue
+        try:
+            # recurse leaves out globals a function doesn't use, which can include large data.
+            encoded[name] = {
+                "status": QueryStatusCode.SUCCESS,
+                "value_encoded": serialize_object_unsafe(value, recurse=True),
+                "error": None,
+            }
+        except Exception as e:
+            encoded[name] = {"status": QueryStatusCode.NOT_SERIALIZABLE, "value_encoded": "", "error": f"{type(e).__name__}: {e}"}
+    return encoded
 
 
 def _find_blacklisted(name: str, fromlist: Sequence[str], import_blacklist: list[str]) -> str | None:
@@ -466,6 +493,7 @@ def _run_sandbox(
     workspace_dir: str | None,
     load_main: Callable[[], tuple[str, str]] | None,
     main_timeout_message: str,
+    on_setup_complete: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], ProcessStartResponse]:
     """
     Shared implementation behind student_code_runner and workspace_runner.
@@ -477,6 +505,10 @@ def _run_sandbox(
     real builtins.__import__ and the directory is put at the front of sys.path, so that student
     modules loaded via importlib.import_module() go through the same restrictions and resolve
     against the workspace.
+
+    *on_setup_complete*, if given, is called with the setup namespace after setup code finishes and
+    before any main/student code runs. It must complete before the main step: it's what lets the
+    grader capture a snapshot of setup values that nothing the student defined or changed can reach.
     """
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
@@ -540,6 +572,11 @@ def _run_sandbox(
                 # If not in local_vars (setup_code), try getting from starting_vars
                 student_code_vars[var_name] = deepcopy(starting_vars[var_name])
 
+    # This has to finish before any student code runs: it's what guarantees the dill data the
+    # grader deserializes contains nothing the student defined or changed.
+    if on_setup_complete is not None:
+        on_setup_complete(local_vars if execution_error is None else {})
+
     if execution_error is None and load_main is not None:
         try:
             # Compile and run the main code (student submission or workspace entry point).
@@ -589,6 +626,7 @@ def student_code_runner(
     builtin_whitelist: list[str] | None,
     names_for_user_list: list[str] | None,
     helper_modules: dict[str, str] | None,
+    on_setup_complete: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], ProcessStartResponse]:
     return _run_sandbox(
         setup_code=setup_code,
@@ -602,6 +640,7 @@ def student_code_runner(
         workspace_dir=None,
         load_main=lambda: (student_code, student_file_name),
         main_timeout_message="Student code execution timed out",
+        on_setup_complete=on_setup_complete,
     )
 
 
@@ -743,6 +782,13 @@ def _serve(conn: Connection, worker_username: str | None, data_files_dir: str | 
 
                 populate_linecache(student_code, student_file_name)
 
+                def send_setup_snapshot(setup_vars: dict[str, Any]) -> None:
+                    snapshot: SetupSnapshotMessage = {"message_type": "setup_snapshot", "variables": encode_setup_variables(setup_vars)}
+                    conn.send(snapshot)
+                    # Wait for the grader to acknowledge before student code runs. Only the ack proves
+                    # the grader has the whole snapshot; a recv failure means it's gone, so stop.
+                    conn.recv()
+
                 local_vars, student_code_vars, start_response = student_code_runner(
                     setup_code=setup_code,
                     student_code=student_code,
@@ -754,6 +800,7 @@ def _serve(conn: Connection, worker_username: str | None, data_files_dir: str | 
                     builtin_whitelist=builtin_whitelist,
                     names_for_user_list=names_for_user_list,
                     helper_modules=start_json_message["helper_modules"],
+                    on_setup_complete=send_setup_snapshot,
                 )
 
                 conn.send(start_response)
@@ -763,13 +810,24 @@ def _serve(conn: Connection, worker_username: str | None, data_files_dir: str | 
                 query_setup_json_message: SetupQueryRequest = json_message
 
                 var_to_query = query_setup_json_message["var"]
-                if var_to_query in local_vars:
-                    setup_query_response: SetupQueryResponse = {
-                        "status": QueryStatusCode.SUCCESS,
-                        "value_encoded": serialize_object_unsafe(local_vars[var_to_query]),
-                    }
+                # Student code may have run by now, so a setup value is only ever sent as JSON here;
+                # the grader never deserializes dill from this response. Values JSON can't represent
+                # come from the snapshot taken before student code ran, not from this path.
+                if var_to_query not in local_vars:
+                    setup_query_response: SetupQueryResponse = {"status": QueryStatusCode.NOT_FOUND, "value": None, "error": None}
                 else:
-                    setup_query_response = {"status": QueryStatusCode.NOT_FOUND, "value_encoded": ""}
+                    try:
+                        setup_query_response = {
+                            "status": QueryStatusCode.SUCCESS,
+                            "value": json.dumps(to_json(local_vars[var_to_query])),
+                            "error": None,
+                        }
+                    except Exception as e:
+                        setup_query_response = {
+                            "status": QueryStatusCode.NOT_SERIALIZABLE,
+                            "value": None,
+                            "error": f"{type(e).__name__}: {e}",
+                        }
 
                 conn.send(setup_query_response)
 

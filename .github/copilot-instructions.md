@@ -152,9 +152,9 @@ the originals through the `tests_dir` fixture. A missing listed file makes the s
 
 ### 5. Serialization
 
-- Student values reach the grader as JSON through `to_json` and `from_json`, including numpy arrays, pandas DataFrames and matplotlib plots (see [src/pytest_prairielearn_grader/matplotlib_json.py](src/pytest_prairielearn_grader/matplotlib_json.py))
-- Uses `dill` for grader-to-student function arguments and `query_setup` values
-- Base64-encoded in JSON for transport
+- Student-to-grader values (`query`, `query_function`) are JSON only, through `to_json` / `from_json`, including numpy arrays, pandas DataFrames and matplotlib plots (see [src/pytest_prairielearn_grader/matplotlib_json.py](src/pytest_prairielearn_grader/matplotlib_json.py))
+- Grader-to-student function arguments use base64-encoded `dill`
+- `query_setup` sends JSON-representable values as JSON when queried. Other values use base64-encoded `dill`, encoded and sent once before student code starts. The grader must not deserialize `dill` from anything sent after that point
 - See [src/pytest_prairielearn_grader/json_utils.py](src/pytest_prairielearn_grader/json_utils.py) for custom serialization
 
 ## Important Integration Points
@@ -179,7 +179,7 @@ the originals through the `tests_dir` fixture. A missing listed file makes the s
 | "Student code server process terminated"   | Check for unhandled exceptions in setup_code or timeout too short                     |
 | Function not found errors                  | Ensure function is defined in student_code.py, not just setup_code.py                 |
 | Timeout errors on network tests            | Increase timeout via `@pytest.mark.sandbox_timeout(N)`                                |
-| Serialization fails                        | Use `dill`-compatible types (check json_utils.py for supported types)                 |
+| Serialization fails                        | Check json_utils.py for types supported; `query_setup` also accepts `dill` values   |
 | Module sandbox with multiple student codes | Use regular `sandbox` fixture instead; module_sandbox requires single student_code.py |
 
 ## Files to Reference When Extending
