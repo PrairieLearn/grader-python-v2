@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -224,6 +225,7 @@ class _SandboxBase:
     builtin_whitelist: list[str] | None
     names_for_user_list: list[str] | None
     worker_username: str | None
+    helper_modules: dict[str, str] | None
     data_files: dict[str, Path] | None
     _data_files_dir: Path | None
     _accumulated_stdout: list[str]
@@ -238,6 +240,7 @@ class _SandboxBase:
         builtin_whitelist: list[str] | None,
         names_for_user_list: list[str] | None,
         worker_username: str | None,
+        helper_modules: dict[str, str] | None = None,
         data_files: dict[str, Path] | None = None,
     ) -> None:
         self.import_whitelist = import_whitelist
@@ -246,6 +249,7 @@ class _SandboxBase:
         self.builtin_whitelist = builtin_whitelist
         self.names_for_user_list = names_for_user_list
         self.worker_username = worker_username
+        self.helper_modules = helper_modules
         self.data_files = data_files
         self._data_files_dir = None
         self.process = None
@@ -253,6 +257,14 @@ class _SandboxBase:
         self._accumulated_stdout = []
         self._server_failure = None
         self._timed_out_call = None
+
+    def _start_server(self, initialization_timeout: float, build_start_message: Callable[[], Any]) -> ProcessStartResponse:
+        """Spawn the subprocess, send the start message it builds, and read the start response."""
+        self._start_subprocess()
+        json_message = build_start_message()
+        self._connect_to_server(initialization_timeout)
+        self._send_json_object(json_message)
+        return self._read_start_response(initialization_timeout)
 
     def _assert_process_running(self) -> None:
         assert self.process is not None, "Sandbox process is not running. Please start it first."
@@ -488,14 +500,20 @@ class StudentFixture(_SandboxBase):
         data_files: dict[str, Path] | None = None,
     ) -> None:
         super().__init__(
-            import_whitelist, import_blacklist, starting_vars, builtin_whitelist, names_for_user_list, worker_username, data_files
+            import_whitelist,
+            import_blacklist,
+            starting_vars,
+            builtin_whitelist,
+            names_for_user_list,
+            worker_username,
+            helper_modules=helper_modules,
+            data_files=data_files,
         )
         self.leading_file = file_names.leading_file
         self.trailing_file = file_names.trailing_file
         self.student_code_file = file_names.student_code_file
         self.setup_code_file = file_names.setup_code_file
         self.notebook_cell_tag = notebook_cell_tag
-        self.helper_modules = helper_modules
 
     def start_student_code_server(self, *, initialization_timeout: float = DEFAULT_TIMEOUT) -> ProcessStartResponse:
         if self.worker_username is not None:
@@ -503,43 +521,40 @@ class StudentFixture(_SandboxBase):
         else:
             logger.debug("Starting student code server without dropping privileges.")
 
-        self._start_subprocess()
+        def build_start_message() -> ProcessStartRequest:
+            student_code = ""
+            if self.leading_file.is_file():
+                student_code += self.leading_file.read_text(encoding="utf-8")
+                student_code += os.linesep
+            if self.student_code_file.is_file():
+                if self.student_code_file.suffix.lower() == ".ipynb":
+                    student_code += _extract_notebook_code(self.student_code_file, self.notebook_cell_tag)
+                else:
+                    student_code += self.student_code_file.read_text(encoding="utf-8")
+            if self.trailing_file.is_file():
+                student_code += os.linesep
+                student_code += self.trailing_file.read_text(encoding="utf-8")
 
-        student_code = ""
-        if self.leading_file.is_file():
-            student_code += self.leading_file.read_text(encoding="utf-8")
-            student_code += os.linesep
-        if self.student_code_file.is_file():
-            if self.student_code_file.suffix.lower() == ".ipynb":
-                student_code += _extract_notebook_code(self.student_code_file, self.notebook_cell_tag)
-            else:
-                student_code += self.student_code_file.read_text(encoding="utf-8")
-        if self.trailing_file.is_file():
-            student_code += os.linesep
-            student_code += self.trailing_file.read_text(encoding="utf-8")
+            setup_code = None
+            if self.setup_code_file.is_file():
+                setup_code = self.setup_code_file.read_text(encoding="utf-8")
 
-        setup_code = None
-        if self.setup_code_file.is_file():
-            setup_code = self.setup_code_file.read_text(encoding="utf-8")
+            # TODO make this a shared type
+            return ProcessStartRequest(
+                message_type=MessageType.START,
+                student_code=student_code,
+                student_file_name=str(self.student_code_file),
+                setup_code=setup_code,
+                initialization_timeout=initialization_timeout,
+                import_whitelist=self.import_whitelist,
+                import_blacklist=self.import_blacklist,
+                starting_vars=self.starting_vars,
+                builtin_whitelist=self.builtin_whitelist,
+                names_for_user_list=self.names_for_user_list,
+                helper_modules=self.helper_modules,
+            )
 
-        self._connect_to_server(initialization_timeout)
-
-        # TODO make this a shared type
-        json_message = ProcessStartRequest(
-            message_type=MessageType.START,
-            student_code=student_code,
-            student_file_name=str(self.student_code_file),
-            setup_code=setup_code,
-            initialization_timeout=initialization_timeout,
-            import_whitelist=self.import_whitelist,
-            import_blacklist=self.import_blacklist,
-            starting_vars=self.starting_vars,
-            builtin_whitelist=self.builtin_whitelist,
-            names_for_user_list=self.names_for_user_list,
-            helper_modules=self.helper_modules,
-        )
-        self._send_json_object(json_message)
-        return self._read_start_response(initialization_timeout)
+        return self._start_server(initialization_timeout, build_start_message)
 
     def query_setup_raw(self, var_to_query: str) -> SetupQueryResponse:
         self._assert_no_server_failure()
@@ -602,38 +617,42 @@ class WorkspaceFixture(_SandboxBase):
         data_files: dict[str, Path] | None = None,
     ) -> None:
         super().__init__(
-            import_whitelist, import_blacklist, starting_vars, builtin_whitelist, names_for_user_list, worker_username, data_files
+            import_whitelist,
+            import_blacklist,
+            starting_vars,
+            builtin_whitelist,
+            names_for_user_list,
+            worker_username,
+            helper_modules=helper_modules,
+            data_files=data_files,
         )
         self.workspace_dir = workspace_dir
         self.setup_code_file = setup_code_file
         self.exec_entry = exec_entry
-        self.helper_modules = helper_modules
 
     def start_workspace_server(self, *, initialization_timeout: float = DEFAULT_TIMEOUT) -> ProcessStartResponse:
         """Start the sandbox subprocess and initialise the workspace."""
-        self._start_subprocess()
 
-        setup_code: str | None = None
-        if self.setup_code_file.is_file():
-            setup_code = self.setup_code_file.read_text(encoding="utf-8")
+        def build_start_message() -> WorkspaceStartRequest:
+            setup_code: str | None = None
+            if self.setup_code_file.is_file():
+                setup_code = self.setup_code_file.read_text(encoding="utf-8")
 
-        self._connect_to_server(initialization_timeout)
+            return WorkspaceStartRequest(
+                message_type=MessageType.START_WORKSPACE,
+                workspace_dir=str(self.workspace_dir),
+                exec_entry=self.exec_entry,
+                setup_code=setup_code,
+                initialization_timeout=initialization_timeout,
+                import_whitelist=self.import_whitelist,
+                import_blacklist=self.import_blacklist,
+                starting_vars=self.starting_vars,
+                builtin_whitelist=self.builtin_whitelist,
+                names_for_user_list=self.names_for_user_list,
+                helper_modules=self.helper_modules,
+            )
 
-        json_message = WorkspaceStartRequest(
-            message_type=MessageType.START_WORKSPACE,
-            workspace_dir=str(self.workspace_dir),
-            exec_entry=self.exec_entry,
-            setup_code=setup_code,
-            initialization_timeout=initialization_timeout,
-            import_whitelist=self.import_whitelist,
-            import_blacklist=self.import_blacklist,
-            starting_vars=self.starting_vars,
-            builtin_whitelist=self.builtin_whitelist,
-            names_for_user_list=self.names_for_user_list,
-            helper_modules=self.helper_modules,
-        )
-        self._send_json_object(json_message)
-        return self._read_start_response(initialization_timeout)
+        return self._start_server(initialization_timeout, build_start_message)
 
     def __repr__(self) -> str:
         return f"WorkspaceFixture(workspace_dir={self.workspace_dir})"
