@@ -1,0 +1,29 @@
+{
+  "expected_data_object": {
+    "score": 0.6666666666666666,
+    "tests": [
+      {
+        "test_id": "test_notebook_stop_tag.py::test_part_1[student_code]",
+        "outcome": "passed",
+        "max_points": 1,
+        "points": 1.0,
+        "points_frac": 1.0
+      },
+      {
+        "test_id": "test_notebook_stop_tag.py::TestPart2::test_part_2[student_code]",
+        "outcome": "passed",
+        "max_points": 1,
+        "points": 1.0,
+        "points_frac": 1.0
+      },
+      {
+        "test_id": "test_notebook_stop_tag.py::test_whole_notebook[student_code]",
+        "message": "Part 3 is unfinished",
+        "outcome": "error",
+        "max_points": 1,
+        "points": 0.0,
+        "points_frac": 0.0
+      }
+    ]
+  }
+}

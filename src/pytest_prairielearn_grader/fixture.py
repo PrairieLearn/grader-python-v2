@@ -66,7 +66,13 @@ class SandboxStopped(RuntimeError):
         self.timed_out_call = timed_out_call
 
 
-def _extract_notebook_code(notebook_path: Path, cell_tag: str | None = None) -> str:
+def _starts_with_tag(source: str, tag: str) -> bool:
+    """Whether the first non-empty line of a cell's source starts with the tag."""
+    lines = source.strip().splitlines()
+    return bool(lines) and lines[0].strip().startswith(tag)
+
+
+def _extract_notebook_code(notebook_path: Path, cell_tag: str | None = None, stop_tag: str | None = None) -> str:
     """Extract Python source code from a Jupyter notebook (.ipynb) file.
 
     Args:
@@ -74,6 +80,10 @@ def _extract_notebook_code(notebook_path: Path, cell_tag: str | None = None) -> 
         cell_tag: When provided, only code cells whose first non-empty line
             starts with this string are included.  When ``None`` all code cells
             are included.
+        stop_tag: When provided, extraction stops at the first code cell whose
+            first non-empty line starts with this string, so that cell and every
+            cell after it are left out. When the notebook has no such cell, every
+            cell is considered.
 
     Returns:
         A single Python source string containing all selected cell contents
@@ -97,10 +107,10 @@ def _extract_notebook_code(notebook_path: Path, cell_tag: str | None = None) -> 
         if cell.cell_type != "code":
             continue
         source: str = cell.source
-        if cell_tag is not None:
-            lines = source.strip().splitlines()
-            if not lines or not lines[0].strip().startswith(cell_tag):
-                continue
+        if stop_tag is not None and _starts_with_tag(source, stop_tag):
+            break
+        if cell_tag is not None and not _starts_with_tag(source, cell_tag):
+            continue
         code_parts.append(source)
 
     return "\n\n".join(code_parts)
@@ -465,6 +475,7 @@ class StudentFixture(_SandboxBase):
         names_for_user_list: list[str] | None,
         worker_username: str | None,
         notebook_cell_tag: str | None = None,
+        notebook_stop_tag: str | None = None,
         helper_modules: dict[str, str] | None = None,
         data_files: dict[str, Path] | None = None,
     ) -> None:
@@ -476,6 +487,7 @@ class StudentFixture(_SandboxBase):
         self.student_code_file = file_names.student_code_file
         self.setup_code_file = file_names.setup_code_file
         self.notebook_cell_tag = notebook_cell_tag
+        self.notebook_stop_tag = notebook_stop_tag
         self.helper_modules = helper_modules
 
     def start_student_code_server(self, *, initialization_timeout: float = DEFAULT_TIMEOUT) -> ProcessStartResponse:
@@ -492,7 +504,7 @@ class StudentFixture(_SandboxBase):
             student_code += os.linesep
         if self.student_code_file.is_file():
             if self.student_code_file.suffix.lower() == ".ipynb":
-                student_code += _extract_notebook_code(self.student_code_file, self.notebook_cell_tag)
+                student_code += _extract_notebook_code(self.student_code_file, self.notebook_cell_tag, self.notebook_stop_tag)
             else:
                 student_code += self.student_code_file.read_text(encoding="utf-8")
         if self.trailing_file.is_file():

@@ -1646,6 +1646,32 @@ never reaches the sandbox.
 > `notebook_cell_tag=None` (the default) includes **all** code cells. Use this when you control
 > the notebook template and don't need students to tag their answers.
 
+### Grading a Notebook in Parts with `notebook_stop_tag`
+
+Student code runs when the sandbox starts, so an exception in any cell fails every test. For a
+notebook with several parts, the `notebook_stop_tag` marker gives a test only the cells before the
+first code cell whose first non-empty line starts with the tag. An unfinished Part 3 then can't
+cost the student the points for Parts 1 and 2:
+
+```python
+@pytest.mark.notebook_stop_tag("# Part 2")
+def test_part_1(sandbox: StudentFixture) -> None:
+    assert sandbox.query_function("double", 4) == 8
+
+
+@pytest.mark.notebook_stop_tag("# Part 3")
+def test_part_2(sandbox: StudentFixture) -> None:
+    assert sandbox.query_function("triple", 4) == 12
+```
+
+- Each test still gets every cell before its stop cell, so Part 2 can use Part 1's functions.
+- The marker works on a test, a class, or a whole module with `pytestmark`. Use the `sandbox`
+  fixture, since `module_sandbox` starts one sandbox for every test in the module.
+- It works with `notebook_cell_tag`: the stop cell is found among all code cells, and only tagged
+  cells before it run.
+- Matching is by prefix, like `notebook_cell_tag`, so `# Part 1` also matches `# Part 10`.
+- If a student deletes the stop cell's tag, the test runs every cell.
+
 ### `info.json` for a JupyterLab Notebook Question
 
 ```json
