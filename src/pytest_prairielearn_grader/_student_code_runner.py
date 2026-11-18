@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from contextlib import redirect_stderr
 from contextlib import redirect_stdout
+from contextlib import suppress
 from copy import deepcopy
 from multiprocessing.connection import Connection
 from typing import Any
@@ -823,10 +824,9 @@ def _serve(conn: Connection, worker_username: str | None, data_files_dir: str | 
 
     except Exception as e:
         # Report an unexpected server-level failure (e.g. a message that couldn't be unpickled) so
-        # the grader can explain it, then stop; the grader closes its end on the next query.
-        try:
+        # the grader can explain it, then stop; the grader closes its end on the next query. The send
+        # itself can fail if the grader already closed the pipe, and there's nothing left to do then.
+        with suppress(Exception):
             conn.send(server_failure_response(f"An error occurred: {e}"))
-        except Exception:
-            pass
     finally:
         conn.close()
