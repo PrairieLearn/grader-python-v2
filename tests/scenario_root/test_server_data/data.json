@@ -1,0 +1,25 @@
+{
+  "params": {
+    "seed": 5,
+    "A": {
+      "_type": "ndarray",
+      "_value": [
+        [1.0, 2.0],
+        [3.0, 4.0]
+      ],
+      "_dtype": "float64"
+    },
+    "names_for_user": [
+      {
+        "name": "x",
+        "type": "int",
+        "description": ""
+      },
+      {
+        "name": "A",
+        "type": "ndarray",
+        "description": ""
+      }
+    ]
+  }
+}

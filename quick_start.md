@@ -193,7 +193,7 @@ in the first place in this table that works:
 | Inputs to the student's functions, including random ones          | The test, passed as arguments. Use `@pytest.mark.parametrize` for several inputs.                                                                                               |
 | Variables that student code reads and that `server.py` randomizes | `data["params"]` in `server.py`, listed in `names_for_user`. Tests read them from the `data_json` fixture. This works for plain JSON values, not ones stored with `pl.to_json`. |
 | Fixed variables that student code reads                           | `starting_vars` in the `ConfigObject`, listed in `names_for_user`                                                                                                               |
-| Variables that student code reads and that need Python to build   | `setup_code.py`, such as numpy arrays or values decoded with `__from_server_json`                                                                                               |
+| Variables that student code reads and that need Python to build   | `setup_code.py`, such as numpy arrays or values decoded with `from_server_json`                                                                                                 |
 | Blocking a library function                                       | [`import_blacklist`](#blocking-functions), such as `["numpy.linalg.inv"]`                                                                                                       |
 | Imports or definitions that the student's code relies on          | The starter code, so that the student sees them. Use `helper_modules` for a module the student imports. Use `leading_code.py` only when neither works.                          |
 
@@ -908,9 +908,20 @@ With `names_for_user` set to `A`, `b` and `n`, student code gets those three var
 students from calling a library function such as `la.inv`, use
 [`import_blacklist`](#blocking-functions) rather than setup code.
 
-- **Parameters.** `__data_params` holds `data["params"]`. Values that `server.py` stored with
-  `pl.to_json` are still encoded: decode them with `__from_server_json`, for example
-  `A = __from_server_json(__data_params["A"])`. The `prairielearn` package isn't available.
+- **Parameters.** Import `data["params"]` from `pytest_prairielearn_grader.server_data`. Values
+  that `server.py` stored with `pl.to_json` are still encoded: decode them with `from_server_json`.
+  The `prairielearn` package isn't available.
+
+  ```python
+  from pytest_prairielearn_grader.server_data import from_server_json, params
+
+  np.random.seed(params["seed"])
+  A = from_server_json(params["A"])
+  ```
+
+  Only setup code can import this module, whatever the import rules. Older setup code can still use
+  `__data_params` and `__from_server_json`, which hold the same values.
+
 - **Restrictions.** Setup code has the same builtins and import rules as student code. For example,
   it can't call `open` or import `os`. To read a data file, list it in [`data_files`](#data-files).
 - **Fresh values.** With the `sandbox` fixture, setup code runs again for each test, so random
@@ -1450,7 +1461,7 @@ def generate(data):
 
 These parameters are automatically passed to the autograder via `/grade/data/data.json` and enforced during student code execution.
 
-In the grader images, `run.sh` passes this path to pytest with `--data-json-path` and makes the file readable only by root, so student code can't open it. The file can contain `correct_answers`. Without that option, for example when running locally, the fixture reads `data.json` next to your test file. The sandbox still receives `params` through `__data_params`, so don't rely on values in `params` staying hidden from student code.
+In the grader images, `run.sh` passes this path to pytest with `--data-json-path` and makes the file readable only by root, so student code can't open it. The file can contain `correct_answers`. Without that option, for example when running locally, the fixture reads `data.json` next to your test file. The sandbox still receives `params` for setup code, so don't rely on values in `params` staying hidden from student code.
 
 #### Testing Import/Builtin Restrictions Locally
 
