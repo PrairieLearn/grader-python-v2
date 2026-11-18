@@ -168,7 +168,9 @@ tests/
     └── data.json                 (if the tests need params)
 ```
 
-Then run `pytest tests/test_student.py`.
+Then run `pytest tests/test_student.py`. To run the tests of several questions at once, pass their
+folder, such as `pytest questions/`. The grader uses pytest's `importlib` import mode, so each
+question's `test_student.py` is imported separately, unless you pass a different `--import-mode`.
 
 ## Where Code Belongs
 
