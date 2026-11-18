@@ -380,12 +380,17 @@ def drop_privileges(user_name: str) -> None:
     except KeyError:
         raise ValueError(f"User '{user_name}' not found.") from None
 
-    # 1. Set the real and effective GID
+    # 1. Drop the supplementary groups inherited from root. Without this the sandbox keeps root's
+    # groups (including group 0), so group permissions wouldn't restrict it. This must happen while
+    # still root, before setuid.
+    os.setgroups([])
+
+    # 2. Set the real and effective GID
     # NOTE: Set GID before UID, as changing UID may restrict GID changes
     os.setgid(target_gid)
     os.setegid(target_gid)
 
-    # 2. Set the real and effective UID
+    # 3. Set the real and effective UID
     os.setuid(target_uid)
     os.seteuid(target_uid)
 

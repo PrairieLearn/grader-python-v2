@@ -370,6 +370,8 @@ def _resolve_sandbox_config(
     # TODO make sure this contains only valid builtins
     builtin_whitelist = merged_params.get("builtin_whitelist")
 
+    logger.debug(f"Import restrictions - whitelist: {import_whitelist}, blacklist: {import_blacklist}")
+
     # Merge starting_vars: __data_params always present, then config_starting_vars
     starting_vars: dict[str, Any] = {
         "__data_params": deepcopy(params_dict) if data_json is not None else {},
