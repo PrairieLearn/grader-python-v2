@@ -339,6 +339,9 @@ For questions where students submit a Jupyter notebook from a workspace:
 - Legacy notebook questions grade only the cells that start with `#grade`. Keep that with
   `notebook_cell_tag="#grade"`. Without it, every code cell runs, including plots and scratch work.
 - Set `sandbox_timeout=15` if the notebook imports numpy or similar libraries.
+- For a notebook in parts, mark each test with `@pytest.mark.notebook_stop_tag("# Part 2")` so
+  an error in a later part doesn't fail the tests for earlier parts. See
+  [Grading a Notebook in Parts](quick_start.md#grading-a-notebook-in-parts-with-notebook_stop_tag).
 - Notebook questions use the normal `sandbox` fixture, not `workspace_mode`.
 - The grader runs the graded cells as a script, so anything a graded cell needs must be defined in
   a graded cell. Tag the cells with the notebook's imports `#grade`. Use `leading_code.py` only

@@ -350,6 +350,17 @@ def _initialize_sandbox_fixture(
 
         config_starting_vars = {}
 
+    # Read from the test, its class or the module (pytestmark), so module_sandbox can use it too.
+    notebook_stop_tag: str | None = None
+    stop_marker = request.node.get_closest_marker("notebook_stop_tag")
+    if stop_marker is not None:
+        if len(stop_marker.args) != 1 or not isinstance(stop_marker.args[0], str) or not stop_marker.args[0].strip():
+            pytest.fail(
+                f"notebook_stop_tag takes one non-empty string, the tag that starts the first cell to leave out, got: {stop_marker.args!r}",
+                pytrace=False,
+            )
+        notebook_stop_tag = stop_marker.args[0]
+
     # Handle names_for_user before merging - ConfigObject has list[str], data.json has list[dict]
     names_for_user_list: list[str] | None = None
     if "names_for_user" in config_dict:
@@ -396,6 +407,7 @@ def _initialize_sandbox_fixture(
         names_for_user_list=names_for_user_list,
         worker_username=request.config.getoption("--worker-username"),
         notebook_cell_tag=notebook_cell_tag,
+        notebook_stop_tag=notebook_stop_tag,
         helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
         data_files=_resolve_data_files(request, data_file_names),
     )
@@ -975,6 +987,9 @@ def pytest_configure(config: Config) -> None:
     # Add a marker for the sandbox fixture to set the initialization timeout
     config.addinivalue_line("markers", "sandbox_timeout(timeout_value): sets a timeout for initialization of the sandbox fixture")
     config.addinivalue_line("markers", "output(level): controls the detail level of grading failure output")
+    config.addinivalue_line(
+        "markers", "notebook_stop_tag(tag): run only the notebook cells before the first code cell that starts with tag"
+    )
 
     # Every question's tests are in a file named test_student.py. pytest's default import mode
     # imports each one as the module `test_student`, so a run over several questions stops with an
