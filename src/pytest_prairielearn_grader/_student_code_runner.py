@@ -676,10 +676,6 @@ def workspace_runner(
     )
 
 
-def server_failure_response(message: str) -> ServerFailureResponse:
-    return {"status": ServerStatusCode.FAILURE, "message": message}
-
-
 def _serve(conn: Connection, worker_username: str | None, data_files_dir: str | None) -> None:
     """
     Entry point for the sandbox child process. Drops privileges, then serves requests over the pipe.
@@ -826,7 +822,8 @@ def _serve(conn: Connection, worker_username: str | None, data_files_dir: str | 
         # Report an unexpected server-level failure (e.g. a message that couldn't be unpickled) so
         # the grader can explain it, then stop; the grader closes its end on the next query. The send
         # itself can fail if the grader already closed the pipe, and there's nothing left to do then.
+        failure: ServerFailureResponse = {"status": ServerStatusCode.FAILURE, "message": f"An error occurred: {e}"}
         with suppress(Exception):
-            conn.send(server_failure_response(f"An error occurred: {e}"))
+            conn.send(failure)
     finally:
         conn.close()
