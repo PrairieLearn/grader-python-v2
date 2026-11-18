@@ -28,6 +28,15 @@
         "points": 1.0,
         "test_id": "test_privilege_drop.py::test_subprocess_group_ids_match[student_code]",
         "outcome": "passed"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "test_supplementary_groups_dropped",
+        "points_frac": 1.0,
+        "points": 1.0,
+        "test_id": "test_privilege_drop.py::test_subprocess_supplementary_groups_dropped[student_code]",
+        "outcome": "passed"
       }
     ]
   }
