@@ -322,7 +322,13 @@ def _resolve_sandbox_config(
     the names_for_user values into starting_vars.
     """
     initialization_timeout: float = DEFAULT_SANDBOX_TIMEOUT
-    params_dict = data_json.get("params", {}) if data_json is not None else {}
+
+    if data_json is None:
+        params_dict = {}
+        logger.debug("No data.json provided, using empty params")
+    else:
+        params_dict = data_json.get("params", {})
+        logger.debug(f"Loaded params from data.json: {list(params_dict.keys())}")
 
     # Check for module-level ConfigObject that overrides all other configuration
     config_dict: dict[str, Any] = {}
@@ -333,6 +339,7 @@ def _resolve_sandbox_config(
         config_object = request.module.autograder_config
         if not isinstance(config_object, ConfigObject):
             pytest.fail(f"autograder_config must be a ConfigObject instance, got {type(config_object).__name__}")
+        logger.debug("Using module-level autograder_config - overriding all other configuration sources")
         config_dict = config_object.to_dict()
         # Handle timeout and starting_vars separately as they're not in to_dict()
         initialization_timeout = config_object.sandbox_timeout
@@ -344,11 +351,13 @@ def _resolve_sandbox_config(
         # This allows setting: sandbox_timeout = 0.5 at module level
         if hasattr(request, "module") and hasattr(request.module, "sandbox_timeout"):
             initialization_timeout = request.module.sandbox_timeout
+            logger.debug(f"Using module-level timeout: {initialization_timeout}s")
 
         # Check for the custom mark (overrides module-level setting)
         marker = request.node.get_closest_marker("sandbox_timeout")
         if marker and marker.args:
             initialization_timeout = marker.args[0]
+            logger.debug(f"Using test-specific timeout override: {initialization_timeout}s")
 
         config_starting_vars = {}
 
@@ -369,6 +378,8 @@ def _resolve_sandbox_config(
     import_blacklist = merged_params.get("import_blacklist", DEFAULT_IMPORT_BLACKLIST)
     # TODO make sure this contains only valid builtins
     builtin_whitelist = merged_params.get("builtin_whitelist")
+
+    logger.debug(f"Import restrictions - whitelist: {import_whitelist}, blacklist: {import_blacklist}")
 
     # Merge starting_vars: __data_params always present, then config_starting_vars
     starting_vars: dict[str, Any] = {
