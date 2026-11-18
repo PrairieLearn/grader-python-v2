@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -40,6 +41,8 @@ DEFAULT_TIMEOUT = 1.0
 # Extra time to wait for the start response, so that the sandbox's own
 # initialization timeout is reported instead of racing against the socket timeout.
 START_RESPONSE_GRACE = 0.5
+# Seconds to wait for the sandbox's process to exit after it closes the connection, to read why it stopped.
+STOPPED_PROCESS_WAIT = 1.0
 
 # Modes for the data files folder (see _make_data_files_dir). Everyone can read the files and list the
 # folders, and nobody can change them; only the owner (root, in the Docker image) can make them writable again.
@@ -276,12 +279,28 @@ class _SandboxBase:
             except TimeoutError as e:
                 raise TimeoutError("Socket read timed out.") from e
             if not chunk:
-                raise Exception("Connection closed by peer before termination character was found.")
+                self._server_failure = self._describe_stopped_sandbox()
+                self._assert_no_server_failure()
             buffer.extend(chunk)
             if max_len is not None and len(buffer) >= max_len:
                 raise Exception(f"Maximum read length of {max_len} exceeded.")
         loc = len(buffer) - len(chunk) + idx + len(terminator)
         return buffer[:loc]
+
+    def _describe_stopped_sandbox(self) -> str:
+        """Say why the sandbox closed the connection, from how its process exited."""
+        return_code = None
+        if self.process is not None:
+            try:
+                return_code = self.process.wait(timeout=STOPPED_PROCESS_WAIT)
+            except subprocess.TimeoutExpired:
+                pass
+        # The kernel's out-of-memory killer, and container memory limits, stop a process with SIGKILL.
+        if sys.platform != "win32" and return_code == -signal.SIGKILL:
+            return "The sandbox running your code was killed, probably because your code used too much memory."
+        if return_code is not None:
+            return f"The sandbox running your code stopped unexpectedly with exit code {return_code}."
+        return "The sandbox running your code stopped unexpectedly."
 
     def _assert_no_server_failure(self) -> None:
         if self._server_failure is not None:
