@@ -229,25 +229,25 @@ def test_timeout_stops_later_tests_on_module_sandbox(pytester: pytest.Pytester) 
 
 
 def test_timeout_reported_by_student_process_stops_sandbox(pytester: pytest.Pytester) -> None:
-    # The socket waits a second longer than the call's timeout, so the student process's own
+    # The grader waits a second longer than the call's timeout, so the student process's own
     # timeout reply always arrives first.
     result = run_grader(
         pytester,
         """
-        class SlowSocket:
-            def __init__(self, sock):
-                self.sock = sock
+        class SlowConnection:
+            def __init__(self, conn):
+                self.conn = conn
 
-            def settimeout(self, timeout):
-                self.sock.settimeout(timeout + 1)
+            def poll(self, timeout=None):
+                return self.conn.poll(timeout + 1 if timeout is not None else None)
 
             def __getattr__(self, name):
-                return getattr(self.sock, name)
+                return getattr(self.conn, name)
 
 
         @pytest.mark.grading_data(name="case", points=1)
         def test_case(sandbox, subtests, monkeypatch):
-            monkeypatch.setattr(sandbox, "student_socket", SlowSocket(sandbox.student_socket))
+            monkeypatch.setattr(sandbox, "_conn", SlowConnection(sandbox._conn))
             for x in [1, 4, 2, 5]:
                 with subtests.test():
                     assert_fn_equal(sandbox, "double", args=(x,), expected=2 * x, query_timeout=0.2)

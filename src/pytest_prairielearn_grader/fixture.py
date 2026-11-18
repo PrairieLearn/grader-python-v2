@@ -1,20 +1,21 @@
 import base64
 import json
 import logging
+import multiprocessing
 import os
 import shutil
 import signal
-import socket
 import stat
-import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
-from importlib.resources import files
+from multiprocessing.connection import Connection
+from multiprocessing.context import SpawnProcess
 from pathlib import Path
 from typing import Any
 from typing import NamedTuple
 
+from ._student_code_runner import _serve
 from .json_utils import from_json
 from .utils import FunctionStatusCode
 from .utils import MessageType
@@ -31,16 +32,17 @@ from .utils import StudentQueryRequest
 from .utils import StudentQueryResponse
 from .utils import WorkspaceStartRequest
 from .utils import deserialize_object_unsafe
-from .utils import drop_privileges
 from .utils import format_call
 from .utils import serialize_object_unsafe
 
 DataFixture = dict[str, Any]
 
-SCRIPT_PATH = str(files("pytest_prairielearn_grader").joinpath("_student_code_runner.py"))
+# The sandbox runs in a child process started with the "spawn" method. spawn gives the child a fresh
+# interpreter instead of forking the grader's memory, which would break the sandbox's isolation.
+_MP_CONTEXT = multiprocessing.get_context("spawn")
 DEFAULT_TIMEOUT = 1.0
 # Extra time to wait for the start response, so that the sandbox's own
-# initialization timeout is reported instead of racing against the socket timeout.
+# initialization timeout is reported instead of racing against the read timeout.
 START_RESPONSE_GRACE = 0.5
 # Seconds to wait for the sandbox's process to exit after it closes the connection, to read why it stopped.
 STOPPED_PROCESS_WAIT = 1.0
@@ -213,12 +215,13 @@ class FeedbackFixture:
 
 class _SandboxBase:
     """
-    Shared subprocess/socket plumbing used by StudentFixture and WorkspaceFixture.
+    Shared child-process/pipe plumbing used by StudentFixture and WorkspaceFixture.
     Not intended to be instantiated directly.
     """
 
-    process: subprocess.Popen | None
-    student_socket: socket.socket | None
+    process: SpawnProcess | None
+    _conn: Connection | None
+    _read_timeout: float
     import_whitelist: list[str] | None
     import_blacklist: list[str] | None
     starting_vars: dict[str, Any] | None
@@ -253,60 +256,47 @@ class _SandboxBase:
         self.data_files = data_files
         self._data_files_dir = None
         self.process = None
-        self.student_socket = None
+        self._conn = None
+        self._read_timeout = DEFAULT_TIMEOUT
         self._accumulated_stdout = []
         self._server_failure = None
         self._timed_out_call = None
 
     def _start_server(self, initialization_timeout: float, build_start_message: Callable[[], Any]) -> ProcessStartResponse:
-        """Spawn the subprocess, send the start message it builds, and read the start response."""
+        """Spawn the child process, send the start message it builds, and read the start response."""
         self._start_subprocess()
         json_message = build_start_message()
-        self._connect_to_server(initialization_timeout)
         self._send_json_object(json_message)
         return self._read_start_response(initialization_timeout)
 
     def _assert_process_running(self) -> None:
         assert self.process is not None, "Sandbox process is not running. Please start it first."
-        process_return_code = self.process.poll()
-        if process_return_code is not None:
-            raise RuntimeError(f"Sandbox process terminated with code {process_return_code}.")
+        if self.process.exitcode is not None:
+            raise RuntimeError(f"Sandbox process terminated with code {self.process.exitcode}.")
 
     def _send_json_object(self, json_object: Any) -> None:
-        assert self.student_socket is not None, "Socket is not connected. Please start the sandbox server first."
-        self.student_socket.sendall((json.dumps(json_object) + os.linesep).encode("utf-8"))
+        assert self._conn is not None, "Pipe is not connected. Please start the sandbox server first."
+        self._conn.send(json_object)
 
-    def _read_from_socket(self) -> bytes:
-        """Read from the socket until a line terminator is found."""
-        buffer = bytearray()
-        terminator = os.linesep.encode("utf-8")
-        max_len: int | None = None  # TODO add max length parameter?
-        assert self.student_socket is not None, "Socket is not connected. Please start the sandbox server first."
-        chunk_size = 4096
-        chunk: bytes = b""
-        # TODO maybe set a hard iteration limit to avoid infinite loops?
-        while (idx := chunk.rfind(terminator)) == -1:
-            try:
-                chunk = self.student_socket.recv(chunk_size)
-            except TimeoutError as e:
-                raise TimeoutError("Socket read timed out.") from e
-            if not chunk:
-                self._server_failure = self._describe_stopped_sandbox()
-                self._assert_no_server_failure()
-            buffer.extend(chunk)
-            if max_len is not None and len(buffer) >= max_len:
-                raise Exception(f"Maximum read length of {max_len} exceeded.")
-        loc = len(buffer) - len(chunk) + idx + len(terminator)
-        return buffer[:loc]
+    def _recv_message(self) -> Any:
+        """Read one message from the pipe, waiting up to the current read timeout for it to arrive."""
+        assert self._conn is not None, "Pipe is not connected. Please start the sandbox server first."
+        if not self._conn.poll(self._read_timeout):
+            raise TimeoutError("Pipe read timed out.")
+        try:
+            return self._conn.recv()
+        except EOFError as e:
+            # The child closed its end without sending a reply, i.e. its process stopped.
+            self._server_failure = self._describe_stopped_sandbox()
+            self._assert_no_server_failure()
+            raise RuntimeError(self._server_failure) from e  # unreachable: the assert above raises
 
     def _describe_stopped_sandbox(self) -> str:
         """Say why the sandbox closed the connection, from how its process exited."""
         return_code = None
         if self.process is not None:
-            try:
-                return_code = self.process.wait(timeout=STOPPED_PROCESS_WAIT)
-            except subprocess.TimeoutExpired:
-                pass
+            self.process.join(timeout=STOPPED_PROCESS_WAIT)
+            return_code = self.process.exitcode
         # The kernel's out-of-memory killer, and container memory limits, stop a process with SIGKILL.
         if sys.platform != "win32" and return_code == -signal.SIGKILL:
             return "The sandbox running your code was killed, probably because your code used too much memory."
@@ -322,50 +312,42 @@ class _SandboxBase:
 
     def _read_query_response(self) -> Any:
         """Read a response to a query, raising a clear error if the server failed and closed the connection."""
-        data = json.loads(self._read_from_socket().decode())
+        data = self._recv_message()
         if data.get("status") == ServerStatusCode.FAILURE:
             self._server_failure = f"The sandbox stopped unexpectedly, so later queries won't work: {data['message']}"
             self._assert_no_server_failure()
+        # A successful query or function call sends its value as a JSON string; decode it back to a
+        # structure so the response matches what callers (and from_json) expect.
+        if data.get("status") == QueryStatusCode.SUCCESS:
+            data["value"] = json.loads(data["value"])
         return data
 
     def _start_subprocess(self) -> None:
-        """Spawn the runner subprocess and store it in ``self.process``."""
-
-        def try_drop_privileges() -> None:
-            if self.worker_username is not None:
-                drop_privileges(self.worker_username)
-
+        """Spawn the runner child process and store it in ``self.process``."""
         # With data files, the sandbox starts in a folder holding copies of them, so student code can
         # read them by relative path. Without them, the starting folder is left as it was.
         if self.data_files is not None:
             self._data_files_dir = _make_data_files_dir(self.data_files)
 
-        self.process = subprocess.Popen(
-            args=(sys.executable, SCRIPT_PATH),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=self._data_files_dir,
-            preexec_fn=None if sys.platform == "win32" else try_drop_privileges,
+        parent_conn, child_conn = _MP_CONTEXT.Pipe()
+        data_files_dir = None if self._data_files_dir is None else str(self._data_files_dir)
+        self.process = _MP_CONTEXT.Process(
+            target=_serve,
+            args=(child_conn, self.worker_username, data_files_dir),
+            daemon=True,
         )
+        self.process.start()
+        # Close the child's end in the grader so that if the child process dies, the grader's recv
+        # sees EOF instead of blocking on a handle it still holds open itself.
+        child_conn.close()
+        self._conn = parent_conn
         self._assert_process_running()
-
-    def _connect_to_server(self, timeout: float) -> None:
-        """Read the host/port printed by the subprocess and connect the socket."""
-        assert self.process is not None
-        assert self.process.stdout is not None
-        host, port = self.process.stdout.readline().decode().strip().split(",")
-        self.student_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.student_socket.settimeout(timeout)
-        self.student_socket.connect((host, int(port)))
 
     def _read_start_response(self, initialization_timeout: float) -> ProcessStartResponse:
         """Read and return the ProcessStartResponse sent after the start message."""
-        assert self.student_socket is not None
-        self.student_socket.settimeout(initialization_timeout + START_RESPONSE_GRACE)
+        self._read_timeout = initialization_timeout + START_RESPONSE_GRACE
         try:
-            data = self._read_from_socket().decode()
-            res: ProcessStartResponse = json.loads(data)
+            res: ProcessStartResponse = self._recv_message()
             if res.get("stdout"):
                 self._accumulated_stdout.append(res["stdout"])
         except Exception as e:
@@ -383,8 +365,7 @@ class _SandboxBase:
         self._assert_no_server_failure()
         self._assert_process_running()
         json_message = StudentQueryRequest(message_type=MessageType.QUERY, var=var_to_query, query_timeout=query_timeout)
-        assert self.student_socket is not None
-        self.student_socket.settimeout(query_timeout)
+        self._read_timeout = query_timeout
         self._send_json_object(json_message)
         try:
             data: StudentQueryResponse = self._read_query_response()
@@ -424,9 +405,8 @@ class _SandboxBase:
             kwargs_encoded=serialize_object_unsafe(kwargs),
             query_timeout=query_timeout,
         )
-        assert self.student_socket is not None
-        self.student_socket.settimeout(query_timeout)
-        self.student_socket.sendall((json.dumps(json_message) + os.linesep).encode("utf-8"))
+        self._read_timeout = query_timeout
+        self._send_json_object(json_message)
         try:
             data: StudentFunctionResponse = self._read_query_response()
         except TimeoutError as error:
@@ -468,12 +448,12 @@ class _SandboxBase:
         return "".join(self._accumulated_stdout)
 
     def _cleanup(self) -> None:
-        if self.student_socket is not None:
-            self.student_socket.close()
-            self.student_socket = None
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
         if self.process is not None:
             self.process.terminate()
-            self.process.wait()
+            self.process.join()
             self.process = None
         if self._data_files_dir is not None:
             _remove_data_files_dir(self._data_files_dir)
@@ -560,9 +540,8 @@ class StudentFixture(_SandboxBase):
         self._assert_no_server_failure()
         self._assert_process_running()
         json_message: SetupQueryRequest = {"message_type": MessageType.QUERY_SETUP, "var": var_to_query}
-        assert self.student_socket is not None, "Student socket is not connected. Please start the student code server first."
         self._send_json_object(json_message)
-        data: SetupQueryResponse = json.loads(self._read_from_socket().decode())
+        data: SetupQueryResponse = self._recv_message()
         return data
 
     def query_setup(self, var_to_query: str) -> Any:
