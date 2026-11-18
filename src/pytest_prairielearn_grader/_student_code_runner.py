@@ -691,30 +691,7 @@ def encode_server_failure(message: str) -> bytes:
 
 
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    """
-    Reads lines from stdin asynchronously and responds on stdout.
-    Mimics a simple server handling requests.
-    """
-    # try:
-    #     json_message = json.loads(message)
-    #     result = await asyncio.wait_for(
-    #         asyncio.get_event_loop().run_in_executor(executor, _run_blocking_task, task_payload), timeout=timeout_seconds
-    #     )
-    #     # Example: send an acknowledgement back
-    #     response_message = {"status": "received", "data": json_message}
-    #     writer.write(json.dumps(response_message).encode("utf-8") + b"\n")  # Add newline for stream parsing
-    #     await writer.drain()
-    #     # ------------------------------------
-
-    # except json.JSONDecodeError as e:
-    #     error_response = {"status": "error", "message": f"Invalid JSON: {e}"}
-    #     writer.write(json.dumps(error_response).encode("utf-8") + b"\n")
-    #     await writer.drain()
-    # except UnicodeDecodeError as e:
-    #     error_response = {"status": "error", "message": f"Invalid UTF-8 encoding: {e}"}
-    #     writer.write(json.dumps(error_response).encode("utf-8") + b"\n")
-    #     await writer.drain()
-
+    """Read JSON request lines from the socket and write a JSON response line for each."""
     try:
         student_code_vars: None | dict = None
         local_vars: None | dict = None
@@ -839,16 +816,6 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 )
 
                 writer.write((encoded_function_response + os.linesep).encode())
-
-            # TODO handle cases of different payloads
-            # The first payload should be student code
-            if line.lower() == "exit":
-                writer.write(("Goodbye!" + os.linesep).encode())
-                await writer.drain()
-                break  # Exit the loop and terminate the server
-
-            # Simulate processing a request
-            # response = f"Server processed: '{line.upper()}'\n"
 
             await writer.drain()  # Ensure the response is written to stdout
 
