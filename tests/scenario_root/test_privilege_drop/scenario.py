@@ -66,3 +66,13 @@ def test_subprocess_group_ids_match(sandbox: StudentFixture) -> None:
     assert real_gid == effective_gid, f"Real GID ({real_gid}) should match effective GID ({effective_gid})"
     assert isinstance(real_gid, int)
     assert real_gid >= 0
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Privilege dropping not supported on Windows")
+@pytest.mark.grading_data(name="test_supplementary_groups_dropped", points=1)
+def test_subprocess_supplementary_groups_dropped(sandbox: StudentFixture) -> None:
+    """When privileges are dropped, root's supplementary groups must not remain."""
+    groups = sandbox.query("current_groups")
+    assert isinstance(groups, list)
+    if sandbox.worker_username is not None:
+        assert 0 not in groups, f"Root's group 0 should have been dropped, but groups are {groups}"
