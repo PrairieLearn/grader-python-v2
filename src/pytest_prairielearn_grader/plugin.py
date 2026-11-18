@@ -293,46 +293,50 @@ def tests_dir(request: pytest.FixtureRequest) -> Path:
     return path
 
 
-def _initialize_sandbox_fixture(
+@dataclass(frozen=True, slots=True)
+class _ResolvedSandboxConfig:
+    """The configuration shared by the student and workspace fixtures, resolved once per fixture."""
+
+    initialization_timeout: float
+    import_whitelist: list[str] | None
+    import_blacklist: list[str] | None
+    builtin_whitelist: list[str] | None
+    starting_vars: dict[str, Any]
+    names_for_user_list: list[str] | None
+    helper_module_names: list[str] | None
+    data_file_names: list[str] | None
+    # The module-level ConfigObject, kept so each fixture can read its own extra fields
+    # (notebook_cell_tag for the student fixture, workspace_exec_entry for the workspace one).
+    config_object: ConfigObject | None
+
+
+def _resolve_sandbox_config(
     request: pytest.FixtureRequest,
     data_json: dict[str, Any] | None,
-    file_names: StudentFiles,
-) -> tuple[StudentFixture, float]:
+) -> _ResolvedSandboxConfig:
     """
-    Common initialization logic for both sandbox and module_sandbox fixtures.
-    Handles parameter parsing, timeout configuration, and StudentFixture creation.
-    Returns the fixture and the initialization timeout.
+    Resolve the configuration common to the sandbox, module_sandbox and workspace_sandbox fixtures.
 
-    Args:
-        request: The pytest fixture request
-        data_json: Data loaded from data.json file
-        file_names: StudentFiles namedtuple with file paths
+    Reads params from data.json and the module-level ConfigObject (or module-level timeout/mark
+    when there's no ConfigObject), merges them with the ConfigObject taking precedence, and injects
+    the names_for_user values into starting_vars.
     """
-    # Default timeout TODO make this a command line option?
     initialization_timeout: float = DEFAULT_SANDBOX_TIMEOUT
-
-    if data_json is None:
-        params_dict = {}
-        logger.debug("No data.json provided, using empty params")
-    else:
-        params_dict = data_json.get("params", {})
-        logger.debug(f"Loaded params from data.json: {list(params_dict.keys())}")
+    params_dict = data_json.get("params", {}) if data_json is not None else {}
 
     # Check for module-level ConfigObject that overrides all other configuration
     config_dict: dict[str, Any] = {}
-    notebook_cell_tag: str | None = None
+    config_object: ConfigObject | None = None
     helper_module_names: list[str] | None = None
     data_file_names: list[str] | None = None
     if hasattr(request, "module") and hasattr(request.module, "autograder_config"):
         config_object = request.module.autograder_config
         if not isinstance(config_object, ConfigObject):
             pytest.fail(f"autograder_config must be a ConfigObject instance, got {type(config_object).__name__}")
-        logger.debug("Using module-level autograder_config - overriding all other configuration sources")
         config_dict = config_object.to_dict()
         # Handle timeout and starting_vars separately as they're not in to_dict()
         initialization_timeout = config_object.sandbox_timeout
         config_starting_vars = config_object.starting_vars
-        notebook_cell_tag = config_object.notebook_cell_tag
         helper_module_names = config_object.helper_modules
         data_file_names = config_object.data_files
     else:
@@ -340,13 +344,11 @@ def _initialize_sandbox_fixture(
         # This allows setting: sandbox_timeout = 0.5 at module level
         if hasattr(request, "module") and hasattr(request.module, "sandbox_timeout"):
             initialization_timeout = request.module.sandbox_timeout
-            logger.debug(f"Using module-level timeout: {initialization_timeout}s")
 
         # Check for the custom mark (overrides module-level setting)
         marker = request.node.get_closest_marker("sandbox_timeout")
         if marker and marker.args:
             initialization_timeout = marker.args[0]
-            logger.debug(f"Using test-specific timeout override: {initialization_timeout}s")
 
         config_starting_vars = {}
 
@@ -374,8 +376,6 @@ def _initialize_sandbox_fixture(
         **config_starting_vars,
     }
 
-    logger.debug(f"Import restrictions - whitelist: {import_whitelist}, blacklist: {import_blacklist}")
-
     # Process names_for_user_list to inject variables from params_dict or starting_vars
     if names_for_user_list is not None:
         for name in names_for_user_list:
@@ -387,20 +387,45 @@ def _initialize_sandbox_fixture(
 
             starting_vars[name] = value
 
-    fixture = StudentFixture(
-        file_names=file_names,
+    return _ResolvedSandboxConfig(
+        initialization_timeout=initialization_timeout,
         import_whitelist=import_whitelist,
         import_blacklist=import_blacklist,
-        starting_vars=starting_vars,
         builtin_whitelist=builtin_whitelist,
+        starting_vars=starting_vars,
         names_for_user_list=names_for_user_list,
-        worker_username=request.config.getoption("--worker-username"),
-        notebook_cell_tag=notebook_cell_tag,
-        helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
-        data_files=_resolve_data_files(request, data_file_names),
+        helper_module_names=helper_module_names,
+        data_file_names=data_file_names,
+        config_object=config_object,
     )
 
-    return fixture, initialization_timeout
+
+def _initialize_sandbox_fixture(
+    request: pytest.FixtureRequest,
+    data_json: dict[str, Any] | None,
+    file_names: StudentFiles,
+) -> tuple[StudentFixture, float]:
+    """
+    Common initialization logic for both sandbox and module_sandbox fixtures.
+    Returns the StudentFixture and the initialization timeout.
+    """
+    config = _resolve_sandbox_config(request, data_json)
+    notebook_cell_tag = config.config_object.notebook_cell_tag if config.config_object is not None else None
+
+    fixture = StudentFixture(
+        file_names=file_names,
+        import_whitelist=config.import_whitelist,
+        import_blacklist=config.import_blacklist,
+        starting_vars=config.starting_vars,
+        builtin_whitelist=config.builtin_whitelist,
+        names_for_user_list=config.names_for_user_list,
+        worker_username=request.config.getoption("--worker-username"),
+        notebook_cell_tag=notebook_cell_tag,
+        helper_modules=_load_helper_modules(request, config.helper_module_names, config.import_blacklist),
+        data_files=_resolve_data_files(request, config.data_file_names),
+    )
+
+    return fixture, config.initialization_timeout
 
 
 def _get_config_output_level(module: ModuleType | None) -> str | None:
@@ -655,54 +680,8 @@ def _initialize_workspace_fixture(
     workspace_dir: Path,
 ) -> tuple[WorkspaceFixture, float]:
     """Initialise a WorkspaceFixture analogously to _initialize_sandbox_fixture."""
-    initialization_timeout: float = DEFAULT_SANDBOX_TIMEOUT
-
-    params_dict = data_json.get("params", {}) if data_json is not None else {}
-
-    config_dict: dict[str, Any] = {}
-    exec_entry: str | None = None
-    helper_module_names: list[str] | None = None
-    data_file_names: list[str] | None = None
-    if hasattr(request, "module") and hasattr(request.module, "autograder_config"):
-        config_object = request.module.autograder_config
-        if not isinstance(config_object, ConfigObject):
-            pytest.fail(f"autograder_config must be a ConfigObject instance, got {type(config_object).__name__}")
-        config_dict = config_object.to_dict()
-        initialization_timeout = config_object.sandbox_timeout
-        config_starting_vars = config_object.starting_vars
-        exec_entry = config_object.workspace_exec_entry
-        helper_module_names = config_object.helper_modules
-        data_file_names = config_object.data_files
-    else:
-        if hasattr(request, "module") and hasattr(request.module, "sandbox_timeout"):
-            initialization_timeout = request.module.sandbox_timeout
-        marker = request.node.get_closest_marker("sandbox_timeout")
-        if marker and marker.args:
-            initialization_timeout = marker.args[0]
-        config_starting_vars = {}
-
-    names_for_user_list: list[str] | None = None
-    if "names_for_user" in config_dict:
-        names_for_user_list = config_dict["names_for_user"]
-    elif "names_for_user" in params_dict:
-        names_for_user_list = [item["name"] for item in params_dict["names_for_user"]]
-
-    merged_params = {**params_dict, **config_dict}
-    import_whitelist = merged_params.get("import_whitelist")
-    import_blacklist = merged_params.get("import_blacklist", DEFAULT_IMPORT_BLACKLIST)
-    builtin_whitelist = merged_params.get("builtin_whitelist")
-
-    starting_vars: dict[str, Any] = {
-        "__data_params": deepcopy(params_dict) if data_json is not None else {},
-        **config_starting_vars,
-    }
-    if names_for_user_list is not None:
-        for name in names_for_user_list:
-            if name in starting_vars and name != "__data_params":
-                value = starting_vars[name]
-            else:
-                value = params_dict.get(name, None)
-            starting_vars[name] = value
+    config = _resolve_sandbox_config(request, data_json)
+    exec_entry = config.config_object.workspace_exec_entry if config.config_object is not None else None
 
     # Resolve setup_code_file from the test module's tests folder
     tests_dir = get_tests_dir(request.module)
@@ -711,17 +690,17 @@ def _initialize_workspace_fixture(
     fixture = WorkspaceFixture(
         workspace_dir=workspace_dir,
         setup_code_file=setup_code_file,
-        import_whitelist=import_whitelist,
-        import_blacklist=import_blacklist,
-        starting_vars=starting_vars,
-        builtin_whitelist=builtin_whitelist,
-        names_for_user_list=names_for_user_list,
+        import_whitelist=config.import_whitelist,
+        import_blacklist=config.import_blacklist,
+        starting_vars=config.starting_vars,
+        builtin_whitelist=config.builtin_whitelist,
+        names_for_user_list=config.names_for_user_list,
         worker_username=request.config.getoption("--worker-username"),
         exec_entry=exec_entry,
-        helper_modules=_load_helper_modules(request, helper_module_names, import_blacklist),
-        data_files=_resolve_data_files(request, data_file_names),
+        helper_modules=_load_helper_modules(request, config.helper_module_names, config.import_blacklist),
+        data_files=_resolve_data_files(request, config.data_file_names),
     )
-    return fixture, initialization_timeout
+    return fixture, config.initialization_timeout
 
 
 @pytest.fixture

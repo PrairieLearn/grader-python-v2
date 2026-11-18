@@ -447,10 +447,9 @@ def _find_helper_name_clashes(workspace_dir: str, helper_modules: dict[str, str]
     return clashes
 
 
-async def student_code_runner(
+async def _run_sandbox(
+    *,
     setup_code: str | None,
-    student_code: str,
-    student_file_name: str,
     timeout: float,
     import_whitelist: list[str] | None,
     import_blacklist: list[str] | None,
@@ -458,7 +457,21 @@ async def student_code_runner(
     builtin_whitelist: list[str] | None,
     names_for_user_list: list[str] | None,
     helper_modules: dict[str, str] | None,
+    workspace_dir: str | None,
+    load_main: Callable[[], tuple[str, str]] | None,
+    main_timeout_message: str,
 ) -> tuple[dict[str, Any], dict[str, Any], ProcessStartResponse]:
+    """
+    Shared implementation behind student_code_runner and workspace_runner.
+
+    Runs the setup code, injects the names_for_user variables, and then runs a main code object:
+    the student submission for student mode, or the workspace entry-point file for workspace mode.
+    *load_main*, called inside the capture/timeout region, returns that code's (source, file_name);
+    pass None to skip the main step. When *workspace_dir* is given, the importer also replaces the
+    real builtins.__import__ and the directory is put at the front of sys.path, so that student
+    modules loaded via importlib.import_module() go through the same restrictions and resolve
+    against the workspace.
+    """
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
     execution_error: Exception | None = None
@@ -468,16 +481,27 @@ async def student_code_runner(
 
     student_code_vars: dict[str, Any] = {}
     student_code_vars["__builtins__"] = get_builtins(builtin_whitelist)
-
     student_code_vars["__builtins__"]["__name__"] = "__main__"  # Set __name__ to "__main__" to mimic the main module
     server_data = ServerDataImport(local_vars.get("__data_params", {}))
-    student_code_vars["__builtins__"]["__import__"] = get_custom_importer(
+    importer = get_custom_importer(
         import_whitelist,
         import_blacklist,
+        workspace_dir,
         helper_modules=None if helper_modules is None else _HelperModules(helper_modules, student_code_vars["__builtins__"]),
         server_data=server_data,
     )
     _block_blacklisted_functions(import_blacklist)
+    student_code_vars["__builtins__"]["__import__"] = importer
+    if workspace_dir is not None:
+        # Patch the real builtins.__import__ so that workspace modules loaded via
+        # importlib.import_module() (which use the real builtins, not student_code_vars)
+        # also go through the same restrictions.  The subprocess is dedicated to one
+        # grading session so this global patch is safe.
+        builtins.__import__ = importer  # type: ignore[assignment]
+        # Insert workspace_dir at the front of sys.path so imports resolve against it.
+        # Use insert(0, ...) to take precedence over any previously added paths.
+        if workspace_dir not in sys.path:
+            sys.path.insert(0, workspace_dir)
 
     try:
         # First, execute the setup code if provided
@@ -513,19 +537,19 @@ async def student_code_runner(
                 # If not in local_vars (setup_code), try getting from starting_vars
                 student_code_vars[var_name] = deepcopy(starting_vars[var_name])
 
-    if execution_error is None:
+    if execution_error is None and load_main is not None:
         try:
-            # Next, compile student code. Make sure to handle errors in this later
-            # TODO have a better filename
-            code_setup = compile(student_code, student_file_name, "exec")
+            # Compile and run the main code (student submission or workspace entry point).
+            main_source, main_file_name = load_main()
+            main_code = compile(main_source, main_file_name, "exec")
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
                 await asyncio.wait_for(
-                    asyncio.get_event_loop().run_in_executor(executor, exec, code_setup, student_code_vars, student_code_vars),
+                    asyncio.get_event_loop().run_in_executor(executor, exec, main_code, student_code_vars, student_code_vars),
                     timeout=timeout,
                 )
 
         except asyncio.TimeoutError:
-            execution_error = asyncio.TimeoutError("Student code execution timed out")
+            execution_error = asyncio.TimeoutError(main_timeout_message)
         except Exception as e:
             execution_error = e
             # TODO this traceback only shows the last line with the exception.
@@ -554,6 +578,33 @@ async def student_code_runner(
     return local_vars, student_code_vars, result_dict
 
 
+async def student_code_runner(
+    setup_code: str | None,
+    student_code: str,
+    student_file_name: str,
+    timeout: float,
+    import_whitelist: list[str] | None,
+    import_blacklist: list[str] | None,
+    starting_vars: dict[str, Any] | None,
+    builtin_whitelist: list[str] | None,
+    names_for_user_list: list[str] | None,
+    helper_modules: dict[str, str] | None,
+) -> tuple[dict[str, Any], dict[str, Any], ProcessStartResponse]:
+    return await _run_sandbox(
+        setup_code=setup_code,
+        timeout=timeout,
+        import_whitelist=import_whitelist,
+        import_blacklist=import_blacklist,
+        starting_vars=starting_vars,
+        builtin_whitelist=builtin_whitelist,
+        names_for_user_list=names_for_user_list,
+        helper_modules=helper_modules,
+        workspace_dir=None,
+        load_main=lambda: (student_code, student_file_name),
+        main_timeout_message="Student code execution timed out",
+    )
+
+
 async def workspace_runner(
     workspace_dir: str,
     exec_entry: str | None,
@@ -577,14 +628,9 @@ async def workspace_runner(
     helper_clashes = _find_helper_name_clashes(workspace_dir, helper_modules)
     shadowed_files = [f for f in _find_shadowed_workspace_files(workspace_dir) if f not in helper_clashes]
 
-    stdout_capture = io.StringIO()
-    stderr_capture = io.StringIO()
-    execution_error: Exception | None = None
-    exception_traceback = None
-    local_vars = deepcopy(starting_vars) if starting_vars else {}
-    local_vars["__from_server_json"] = from_server_json
-
     if helper_clashes or shadowed_files:
+        local_vars = deepcopy(starting_vars) if starting_vars else {}
+        local_vars["__from_server_json"] = from_server_json
         reasons = []
         if helper_clashes:
             reasons.append(f"These names are reserved for modules that this question provides: {', '.join(helper_clashes)}.")
@@ -601,88 +647,33 @@ async def workspace_runner(
         }
         return local_vars, {}, start_response
 
-    student_code_vars: dict[str, Any] = {}
-    student_code_vars["__builtins__"] = get_builtins(builtin_whitelist)
-    student_code_vars["__builtins__"]["__name__"] = "__main__"
-    server_data = ServerDataImport(local_vars.get("__data_params", {}))
-    workspace_importer = get_custom_importer(
-        import_whitelist,
-        import_blacklist,
-        workspace_dir,
-        helper_modules=None if helper_modules is None else _HelperModules(helper_modules, student_code_vars["__builtins__"]),
-        server_data=server_data,
-    )
-    _block_blacklisted_functions(import_blacklist)
-    student_code_vars["__builtins__"]["__import__"] = workspace_importer
-    # Patch the real builtins.__import__ so that workspace modules loaded via
-    # importlib.import_module() (which use the real builtins, not student_code_vars)
-    # also go through the same restrictions.  The subprocess is dedicated to one
-    # grading session so this global patch is safe.
-    builtins.__import__ = workspace_importer  # type: ignore[assignment]
-
-    # Insert workspace_dir at the front of sys.path so imports resolve against it.
-    # Use insert(0, ...) to take precedence over any previously added paths.
-    if workspace_dir not in sys.path:
-        sys.path.insert(0, workspace_dir)
-
-    try:
-        if setup_code:
-            code_setup = compile(setup_code, "<setup>", "exec")
-            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                await asyncio.wait_for(
-                    asyncio.get_event_loop().run_in_executor(executor, exec, code_setup, student_code_vars, local_vars),
-                    timeout=timeout,
-                )
-    except asyncio.TimeoutError:
-        execution_error = asyncio.TimeoutError("Setup code execution timed out")
-    except Exception as e:
-        execution_error = e
-
-    server_data.available = False
-
-    if names_for_user_list is not None:
-        for var_name in names_for_user_list:
-            if var_name in local_vars:
-                student_code_vars[var_name] = deepcopy(local_vars[var_name])
-            elif starting_vars is not None and var_name in starting_vars:
-                student_code_vars[var_name] = deepcopy(starting_vars[var_name])
-
     # Optionally exec an entry-point file at startup (e.g. "main.py") so that
     # module-level side effects in the student's root script are applied.
-    if execution_error is None and exec_entry is not None:
-        entry_path = pathlib.Path(workspace_dir) / exec_entry
-        try:
+    load_main: Callable[[], tuple[str, str]] | None = None
+    if exec_entry is not None:
+        entry = exec_entry
+
+        def load_entry() -> tuple[str, str]:
+            entry_path = pathlib.Path(workspace_dir) / entry
             entry_source = entry_path.read_text(encoding="utf-8")
-            entry_code = compile(entry_source, str(entry_path), "exec")
             populate_linecache(entry_source, str(entry_path))
-            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                await asyncio.wait_for(
-                    asyncio.get_event_loop().run_in_executor(executor, exec, entry_code, student_code_vars, student_code_vars),
-                    timeout=timeout,
-                )
-        except asyncio.TimeoutError:
-            execution_error = asyncio.TimeoutError("Entry-point file execution timed out")
-        except Exception as e:
-            execution_error = e
-            exception_traceback = traceback.format_exc(limit=-1)
+            return entry_source, str(entry_path)
 
-    if execution_error is None:
-        status = ProcessStatusCode.SUCCESS
-    elif isinstance(execution_error, asyncio.TimeoutError):
-        status = ProcessStatusCode.TIMEOUT
-    else:
-        status = ProcessStatusCode.EXCEPTION
+        load_main = load_entry
 
-    result_dict: ProcessStartResponse = {
-        "status": status,
-        "stdout": stdout_capture.getvalue(),
-        "stderr": stderr_capture.getvalue(),
-        "execution_error": type(execution_error).__name__ if execution_error else None,
-        "execution_message": str(execution_error) if execution_error else None,
-        "execution_traceback": str(exception_traceback),
-    }
-
-    return local_vars, student_code_vars, result_dict
+    return await _run_sandbox(
+        setup_code=setup_code,
+        timeout=timeout,
+        import_whitelist=import_whitelist,
+        import_blacklist=import_blacklist,
+        starting_vars=starting_vars,
+        builtin_whitelist=builtin_whitelist,
+        names_for_user_list=names_for_user_list,
+        helper_modules=helper_modules,
+        workspace_dir=workspace_dir,
+        load_main=load_main,
+        main_timeout_message="Entry-point file execution timed out",
+    )
 
 
 def encode_server_failure(message: str) -> bytes:
