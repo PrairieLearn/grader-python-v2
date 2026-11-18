@@ -823,7 +823,11 @@ def _serve(conn: Connection, worker_username: str | None, data_files_dir: str | 
                             "error": None,
                         }
                     except Exception as e:
-                        setup_query_response = {"status": QueryStatusCode.NOT_SERIALIZABLE, "value": None, "error": f"{type(e).__name__}: {e}"}
+                        setup_query_response = {
+                            "status": QueryStatusCode.NOT_SERIALIZABLE,
+                            "value": None,
+                            "error": f"{type(e).__name__}: {e}",
+                        }
 
                 conn.send(setup_query_response)
 

