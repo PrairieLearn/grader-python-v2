@@ -1,4 +1,3 @@
-import asyncio
 import builtins
 import concurrent.futures
 import importlib
@@ -15,7 +14,9 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from contextlib import redirect_stderr
 from contextlib import redirect_stdout
+from contextlib import suppress
 from copy import deepcopy
+from multiprocessing.connection import Connection
 from typing import Any
 
 from pytest_prairielearn_grader.json_utils import from_server_json
@@ -39,6 +40,7 @@ from pytest_prairielearn_grader.utils import StudentQueryRequest
 from pytest_prairielearn_grader.utils import StudentQueryResponse
 from pytest_prairielearn_grader.utils import WorkspaceStartRequest
 from pytest_prairielearn_grader.utils import deserialize_object_unsafe
+from pytest_prairielearn_grader.utils import drop_privileges
 from pytest_prairielearn_grader.utils import get_builtins
 from pytest_prairielearn_grader.utils import serialize_object_unsafe
 
@@ -48,8 +50,6 @@ ImportFunction = Callable[[str, Mapping[str, object] | None, Mapping[str, object
 # get_custom_importer must delegate to this to avoid recursion when builtins.__import__
 # is later replaced by a workspace_importer in workspace_runner.
 _REAL_IMPORT: ImportFunction = builtins.__import__  # type: ignore[assignment]
-
-HOST = "127.0.0.1"  # Loopback address, means "this computer only"
 
 
 # Global ThreadPoolExecutor for CPU-bound tasks
@@ -120,15 +120,15 @@ def _look_up_function(name: str, student_code_vars: dict[str, Any], workspace_mo
     return student_code_vars[name]
 
 
-async def student_function_runner(
+def student_function_runner(
     student_code_vars: dict[str, Any],
     func_name: str,
     timeout: float,
     args_tup: Any,
     kwargs_dict: Any,
     workspace_mode: bool = False,
-) -> str:
-    """Run a student function and return its StudentFunctionResponse encoded as a JSON string."""
+) -> StudentFunctionResponse:
+    """Run a student function and return its StudentFunctionResponse."""
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
     execution_error: Exception | None = None
@@ -144,12 +144,11 @@ async def student_function_runner(
             return student_function(*args_tup, **kwargs_dict)
 
         with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-            future = asyncio.get_event_loop().run_in_executor(executor, student_function_temp)
-            done, _ = await asyncio.wait({future}, timeout=timeout)
-            if done:
-                result = future.result()
-            else:
-                execution_error = asyncio.TimeoutError(f"Function timed out after {timeout} seconds")
+            future = executor.submit(student_function_temp)
+            try:
+                result = future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                execution_error = TimeoutError(f"Function timed out after {timeout} seconds")
                 timed_out = True
     except FunctionNotFoundError as e:
         execution_error = NameError(str(e))
@@ -176,9 +175,16 @@ async def student_function_runner(
         "traceback": exception_traceback,
     }
 
+    # On any execution error the call produced no value, so leave it as None.
+    if execution_error is not None:
+        return function_response
+
     try:
-        function_response["value"] = to_json(result)
-        return json.dumps(function_response)
+        # The value is sent back to the grader as a JSON string so that only JSON data, never a
+        # student-controlled object, crosses the pipe into the grader process. json.dumps also
+        # raises here for a value that can't be represented, which drives the NOT_SERIALIZABLE path.
+        function_response["value"] = json.dumps(to_json(result))
+        return function_response
     except Exception as e:
         not_serializable_response: StudentFunctionResponse = {
             "status": FunctionStatusCode.NOT_SERIALIZABLE,
@@ -191,7 +197,7 @@ async def student_function_runner(
             ),
             "traceback": None,
         }
-        return json.dumps(not_serializable_response)
+        return not_serializable_response
 
 
 def _find_blacklisted(name: str, fromlist: Sequence[str], import_blacklist: list[str]) -> str | None:
@@ -447,7 +453,7 @@ def _find_helper_name_clashes(workspace_dir: str, helper_modules: dict[str, str]
     return clashes
 
 
-async def _run_sandbox(
+def _run_sandbox(
     *,
     setup_code: str | None,
     timeout: float,
@@ -509,13 +515,10 @@ async def _run_sandbox(
             # Compile the setup code
             code_setup = compile(setup_code, "<setup>", "exec")
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                await asyncio.wait_for(
-                    asyncio.get_event_loop().run_in_executor(executor, exec, code_setup, student_code_vars, local_vars),
-                    timeout=timeout,
-                )
+                executor.submit(exec, code_setup, student_code_vars, local_vars).result(timeout=timeout)
 
-    except asyncio.TimeoutError:
-        execution_error = asyncio.TimeoutError("Setup code execution timed out")
+    except concurrent.futures.TimeoutError:
+        execution_error = TimeoutError("Setup code execution timed out")
         # TODO need to create a different message for setup code errors. This should result
         # in a different error message reported from the test case.
     except Exception as e:
@@ -543,13 +546,10 @@ async def _run_sandbox(
             main_source, main_file_name = load_main()
             main_code = compile(main_source, main_file_name, "exec")
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                await asyncio.wait_for(
-                    asyncio.get_event_loop().run_in_executor(executor, exec, main_code, student_code_vars, student_code_vars),
-                    timeout=timeout,
-                )
+                executor.submit(exec, main_code, student_code_vars, student_code_vars).result(timeout=timeout)
 
-        except asyncio.TimeoutError:
-            execution_error = asyncio.TimeoutError(main_timeout_message)
+        except concurrent.futures.TimeoutError:
+            execution_error = TimeoutError(main_timeout_message)
         except Exception as e:
             execution_error = e
             # TODO this traceback only shows the last line with the exception.
@@ -561,7 +561,7 @@ async def _run_sandbox(
     # Determine the status based on the type of error
     if execution_error is None:
         status = ProcessStatusCode.SUCCESS
-    elif isinstance(execution_error, asyncio.TimeoutError):
+    elif isinstance(execution_error, TimeoutError):
         status = ProcessStatusCode.TIMEOUT
     else:
         status = ProcessStatusCode.EXCEPTION
@@ -578,7 +578,7 @@ async def _run_sandbox(
     return local_vars, student_code_vars, result_dict
 
 
-async def student_code_runner(
+def student_code_runner(
     setup_code: str | None,
     student_code: str,
     student_file_name: str,
@@ -590,7 +590,7 @@ async def student_code_runner(
     names_for_user_list: list[str] | None,
     helper_modules: dict[str, str] | None,
 ) -> tuple[dict[str, Any], dict[str, Any], ProcessStartResponse]:
-    return await _run_sandbox(
+    return _run_sandbox(
         setup_code=setup_code,
         timeout=timeout,
         import_whitelist=import_whitelist,
@@ -605,7 +605,7 @@ async def student_code_runner(
     )
 
 
-async def workspace_runner(
+def workspace_runner(
     workspace_dir: str,
     exec_entry: str | None,
     setup_code: str | None,
@@ -661,7 +661,7 @@ async def workspace_runner(
 
         load_main = load_entry
 
-    return await _run_sandbox(
+    return _run_sandbox(
         setup_code=setup_code,
         timeout=timeout,
         import_whitelist=import_whitelist,
@@ -676,31 +676,43 @@ async def workspace_runner(
     )
 
 
-def encode_server_failure(message: str) -> bytes:
-    response: ServerFailureResponse = {"status": ServerStatusCode.FAILURE, "message": message}
-    return (json.dumps(response) + os.linesep).encode()
+def _serve(conn: Connection, worker_username: str | None, data_files_dir: str | None) -> None:
+    """
+    Entry point for the sandbox child process. Drops privileges, then serves requests over the pipe.
 
+    The grader spawns this with a multiprocessing.Process and holds the other end of the pipe. Each
+    request is a message dict received with conn.recv(); the response dict is sent with conn.send().
+    The loop ends when the grader closes its end (conn.recv() raises EOFError) or the process is
+    terminated.
+    """
+    # multiprocessing.Process has no preexec_fn, so the privilege drop is the first thing the child
+    # does, before it reads or runs anything on the grader's behalf.
+    if worker_username is not None and sys.platform != "win32":
+        drop_privileges(worker_username)
+    # With data files, the sandbox runs in a folder holding copies of them so student code can read
+    # them by relative path. subprocess set this with cwd=...; multiprocessing has no such option.
+    if data_files_dir is not None:
+        os.chdir(data_files_dir)
+    # Student code runs on a worker thread with no display, so matplotlib must not pick a GUI backend.
+    os.environ.setdefault("MPLBACKEND", "Agg")
 
-async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    """Read JSON request lines from the socket and write a JSON response line for each."""
+    student_code_vars: None | dict = None
+    local_vars: None | dict = None
+    workspace_mode: bool = False
+
     try:
-        student_code_vars: None | dict = None
-        local_vars: None | dict = None
-        workspace_mode: bool = False
-
-        async for line_bytes in reader:
-            line = line_bytes.decode().strip()
-            if not line:  # Handle empty lines
-                continue
-
-            json_message = json.loads(line)
+        while True:
+            try:
+                json_message = conn.recv()
+            except EOFError:
+                break
 
             msg_type = json_message.get("message_type")
             if msg_type == MessageType.START_WORKSPACE:
                 ws_json_message: WorkspaceStartRequest = json_message
                 workspace_mode = True
 
-                local_vars, student_code_vars, start_response = await workspace_runner(
+                local_vars, student_code_vars, start_response = workspace_runner(
                     workspace_dir=ws_json_message["workspace_dir"],
                     exec_entry=ws_json_message["exec_entry"],
                     setup_code=ws_json_message["setup_code"],
@@ -713,7 +725,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     helper_modules=ws_json_message["helper_modules"],
                 )
 
-                writer.write((json.dumps(start_response) + os.linesep).encode())
+                conn.send(start_response)
 
             elif msg_type == MessageType.START:
                 start_json_message: ProcessStartRequest = json_message
@@ -731,7 +743,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
                 populate_linecache(student_code, student_file_name)
 
-                local_vars, student_code_vars, start_response = await student_code_runner(
+                local_vars, student_code_vars, start_response = student_code_runner(
                     setup_code=setup_code,
                     student_code=student_code,
                     student_file_name=student_file_name,
@@ -744,7 +756,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     helper_modules=start_json_message["helper_modules"],
                 )
 
-                writer.write((json.dumps(start_response) + os.linesep).encode())
+                conn.send(start_response)
 
             elif msg_type == MessageType.QUERY_SETUP:
                 assert local_vars is not None
@@ -759,7 +771,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 else:
                     setup_query_response = {"status": QueryStatusCode.NOT_FOUND, "value_encoded": ""}
 
-                writer.write((json.dumps(setup_query_response) + os.linesep).encode())
+                conn.send(setup_query_response)
 
             elif msg_type == MessageType.QUERY:
                 assert student_code_vars is not None
@@ -776,22 +788,20 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                         raise KeyError(var_to_query)
 
                 except (KeyError, AttributeError, ImportError):
-                    not_found_response: StudentQueryResponse = {"status": QueryStatusCode.NOT_FOUND, "value": "", "error": None}
-                    encoded_query_response = json.dumps(not_found_response)
+                    query_response: StudentQueryResponse = {"status": QueryStatusCode.NOT_FOUND, "value": "", "error": None}
                 else:
                     try:
-                        query_response: StudentQueryResponse = {"status": QueryStatusCode.SUCCESS, "value": to_json(value), "error": None}
-                        encoded_query_response = json.dumps(query_response)
+                        # Send the value as a JSON string: see student_function_runner for why.
+                        query_response = {"status": QueryStatusCode.SUCCESS, "value": json.dumps(to_json(value)), "error": None}
                     except Exception as e:
-                        not_serializable_response: StudentQueryResponse = {
+                        query_response = {
                             "status": QueryStatusCode.NOT_SERIALIZABLE,
                             "value": None,
                             "error": f"Variable '{var_to_query}' has a value of type {type(value).__name__}, "
                             f"which can't be sent back to the grader: {e}",
                         }
-                        encoded_query_response = json.dumps(not_serializable_response)
 
-                writer.write((encoded_query_response + os.linesep).encode())
+                conn.send(query_response)
 
             elif msg_type == MessageType.QUERY_FUNCTION:
                 assert student_code_vars is not None
@@ -802,54 +812,18 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 kwargs = deserialize_object_unsafe(query_function_json_message["kwargs_encoded"])
                 query_timeout = query_function_json_message["query_timeout"]
 
-                encoded_function_response = await student_function_runner(
+                function_response = student_function_runner(
                     student_code_vars, func_name, query_timeout, args, kwargs, workspace_mode=workspace_mode
                 )
 
-                writer.write((encoded_function_response + os.linesep).encode())
+                conn.send(function_response)
 
-            await writer.drain()  # Ensure the response is written to stdout
-
-    except asyncio.CancelledError:
-        writer.write(encode_server_failure("Server was cancelled."))
-    except asyncio.TimeoutError:
-        writer.write(encode_server_failure("Student code timed out."))
     except Exception as e:
-        writer.write(encode_server_failure(f"An error occurred: {e}"))
+        # Report an unexpected server-level failure (e.g. a message that couldn't be unpickled) so
+        # the grader can explain it, then stop; the grader closes its end on the next query. The send
+        # itself can fail if the grader already closed the pipe, and there's nothing left to do then.
+        failure: ServerFailureResponse = {"status": ServerStatusCode.FAILURE, "message": f"An error occurred: {e}"}
+        with suppress(Exception):
+            conn.send(failure)
     finally:
-        # It's good practice to close transports and writers
-        # print("Closing server connections...")
-        await writer.drain()  # Ensure all data is sent before closing
-        writer.close()
-        await writer.wait_closed()  # Wait for the writer to finish closing
-
-
-async def main():
-    """
-    Starts the asynchronous socket server.
-    """
-    # Ensure ProactorEventLoop is used on Windows for robust socket operations
-    if sys.platform == "win32":
-        try:
-            loop = asyncio.ProactorEventLoop()
-            asyncio.set_event_loop(loop)
-            print("Using ProactorEventLoop on Windows.", file=sys.stderr)
-        except NotImplementedError:
-            print("ProactorEventLoop not available, continuing with default loop.", file=sys.stderr)
-
-    line_limit = 10 * 1024 * 1024  # 10 MB line limit to handle large messages
-
-    # Start the server, binding to the specified host and port
-    server = await asyncio.start_server(handle_client, HOST, 0, limit=line_limit)
-    addr = server.sockets[0].getsockname()
-    print(f"{addr[0]}, {addr[1]}", flush=True)
-
-    async with server:
-        # Run forever, or until the server is explicitly stopped
-        await server.serve_forever()
-
-
-if __name__ == "__main__":
-    # Student code runs on a worker thread with no display, so matplotlib must not pick a GUI backend.
-    os.environ.setdefault("MPLBACKEND", "Agg")
-    asyncio.run(main())
+        conn.close()
