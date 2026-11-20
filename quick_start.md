@@ -394,7 +394,7 @@ comes from the same sandbox as the student's code, so a random value matches the
 code received.
 
 **Note**: Values sent back from the sandbox must be serializable. Supported types include: `int`, `float`, `str`, `list`, `dict`, `bool`, `None`, numpy arrays, pandas DataFrames,
-and matplotlib plots (see [Testing Matplotlib Plots](#testing-matplotlib-plots)).
+scipy sparse matrices (CSR, CSC and COO), and matplotlib plots (see [Testing Matplotlib Plots](#testing-matplotlib-plots)).
 
 ### Checking Answers
 
@@ -859,6 +859,7 @@ The grader automatically serializes/deserializes:
 - Matplotlib `Axes` and `Figure` values (received as a `Figure`)
 - NumPy arrays
 - Pandas DataFrames
+- SciPy sparse matrices (CSR, CSC and COO)
 - Standard Python types (int, float, str, list, dict, bool, None)
 
 ## Giving Values to Student Code

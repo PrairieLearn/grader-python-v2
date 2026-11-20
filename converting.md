@@ -46,10 +46,10 @@ Read every file in the question, including `info.json`, `question.html`, `server
 
 - **A custom grader image** or an `entrypoint` in `externalGradingOptions`.
 - **Values the sandbox can't send back.** Tests can only receive values that can be serialized:
-  numbers, strings, `None`, lists, dicts, numpy arrays and scalars, pandas DataFrames and matplotlib
-  plots. A test that needs a student's class instance, generator or
-  open file has to be rewritten to call student functions that return plain values. Do that only
-  if the student's task stays the same.
+  numbers, strings, `None`, lists, dicts, numpy arrays and scalars, pandas DataFrames, scipy sparse
+  matrices (CSR, CSC and COO) and matplotlib plots. A test that needs a student's class instance,
+  generator or open file has to be rewritten to call student functions that return plain values. Do
+  that only if the student's task stays the same.
 
 ## 2. Change the files
 

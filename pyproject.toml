@@ -29,6 +29,7 @@ dev = [
     "mypy",
     "ruff>=0.11.12",
     "sympy",
+    "scipy",
     "pandas-stubs",
     "matplotlib-stubs",
     "matplotlib",
@@ -124,5 +125,5 @@ exclude = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["sympy.*", "dill.*"]
+module = ["sympy.*", "dill.*", "scipy.*"]
 ignore_missing_imports = true

@@ -50,6 +50,11 @@ def to_json(v: Any) -> Any:
             pure_json_df = json.loads(encoded_json_str_df)
 
             return {"_type": "dataframe_v2", "_value": pure_json_df}
+    elif module == "scipy":
+        import scipy.sparse as sp
+
+        if sp.issparse(v):
+            return _sparse_to_json(v)
     elif module == "matplotlib":
         from pytest_prairielearn_grader.matplotlib_json import is_plot
         from pytest_prairielearn_grader.matplotlib_json import plot_to_json
@@ -60,6 +65,35 @@ def to_json(v: Any) -> Any:
         return v
 
     return v
+
+
+def _sparse_to_json(v: Any) -> dict[str, Any]:
+    """Serialize a scipy.sparse matrix or array to a JSON-safe dict.
+
+    CSR, CSC and COO keep their native index arrays so the matrix round-trips exactly,
+    including the student's own ordering of entries. Other formats are stored as COO.
+    """
+    fmt = v.format
+    if fmt not in ("csr", "csc", "coo"):
+        v = v.tocoo()
+        fmt = "coo"
+
+    import scipy.sparse as sp
+
+    result: dict[str, Any] = {
+        "_type": "sparse",
+        "_format": fmt,
+        "_container": "array" if isinstance(v, sp.sparray) else "matrix",
+        "_shape": list(v.shape),
+        "_data": to_json(v.data),
+    }
+    if fmt == "coo":
+        result["_row"] = v.row.tolist()
+        result["_col"] = v.col.tolist()
+    else:
+        result["_indices"] = v.indices.tolist()
+        result["_indptr"] = v.indptr.tolist()
+    return result
 
 
 def _has_value_fields(v, fields: list[str]) -> bool:
@@ -122,9 +156,30 @@ def from_json(v_json) -> Any:
                 return plot_from_json(v_json["_value"])
             else:
                 raise ValueError("variable of type matplotlib_figure should have value")
+        elif v_json["_type"] == "sparse":
+            return _sparse_from_json(v_json)
         else:
             raise ValueError("variable has unknown type {}".format(v_json["_type"]))
     return v_json
+
+
+def _sparse_from_json(v_json: dict[str, Any]) -> Any:
+    """Reconstruct a scipy.sparse matrix or array from the dict produced by `_sparse_to_json`."""
+    import numpy as np
+    import scipy.sparse as sp
+
+    fmt = v_json["_format"]
+    suffix = "array" if v_json.get("_container") == "array" else "matrix"
+    constructor = getattr(sp, f"{fmt}_{suffix}")
+    data = from_json(v_json["_data"])
+    shape = tuple(v_json["_shape"])
+
+    if fmt == "coo":
+        coords = (np.array(v_json["_row"]), np.array(v_json["_col"]))
+        return constructor((data, coords), shape=shape)
+    indices = np.array(v_json["_indices"])
+    indptr = np.array(v_json["_indptr"])
+    return constructor((data, indices, indptr), shape=shape)
 
 
 def from_server_json(v_json: dict) -> Any:
