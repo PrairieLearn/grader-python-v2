@@ -634,6 +634,27 @@ def test_output_manually(sandbox: StudentFixture) -> None:
     assert_true("Hello, Alice!" in output, msg="Greeting message not found in output")
 ```
 
+### Inspecting the Student's Source
+
+Most tests check what student code _computes_. When you need to check how the submission is
+_written_ — for example, that a result was built a particular way — use `sandbox.student_source()`
+to get the submitted source as a string and inspect it, usually with the `ast` module.
+
+```python
+import ast
+
+
+@pytest.mark.grading_data(name="Uses matrix multiplication", points=1)
+def test_uses_matmul(sandbox: StudentFixture) -> None:
+    tree = ast.parse(sandbox.student_source())
+    uses_matmul = any(isinstance(node, ast.BinOp) and isinstance(node.op, ast.MatMult) for node in ast.walk(tree))
+    assert_true(uses_matmul, msg="Use the @ operator for matrix multiplication.")
+```
+
+`student_source()` returns only the student's file, not any `leading_code.py` or `trailing_code.py`
+the question adds around it. For a notebook submission it returns the graded cells' code (selected
+by `notebook_cell_tag` when one is set), the same code that runs in the sandbox.
+
 ### Module-Scoped Sandbox
 
 Use `module_sandbox` instead of `sandbox` when you want student code state to persist
