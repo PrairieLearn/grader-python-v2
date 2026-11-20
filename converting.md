@@ -187,6 +187,7 @@ regrade of a variant, and `question.html` could show it with `{{params.x}}`.
 | `total_iters = 3` and `@not_repeated`              | `@pytest.mark.parametrize` over the inputs, or a loop of `subtests.test()` blocks for partial credit                  |
 | `Feedback.not_allowed`                             | `import_blacklist=["numpy.linalg.inv"]` in the `ConfigObject`. See [Update the setup code](#4-update-the-setup-code). |
 | `repeated_setup()`                                 | Not needed: setup code runs again for each sandbox.                                                                   |
+| Reading `/grade/student/user_code.py` to inspect the submission with `ast` | `sandbox.student_source()`. See [Inspecting the Student's Source](quick_start.md#inspecting-the-students-source). |
 
 ### Checks
 

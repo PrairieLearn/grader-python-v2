@@ -551,6 +551,24 @@ class StudentFixture(_SandboxBase):
             raise NameError(f"Query for setup variable '{var_to_query}' failed")
         return deserialize_object_unsafe(response["value_encoded"])
 
+    def student_source(self) -> str:
+        """Return the source code the student submitted.
+
+        Use this to inspect the submission itself, for example parsing it with
+        :mod:`ast` to check how a result was produced. For a ``.py`` submission
+        this is the file's text. For a notebook submission it is the code from
+        the graded cells, the same code that runs in the sandbox, selected by
+        ``notebook_cell_tag`` when one is set.
+
+        This is only the student's file, not any ``leading_code.py`` or
+        ``trailing_code.py`` the question adds around it.
+        """
+        if not self.student_code_file.is_file():
+            raise FileNotFoundError(f"No student submission found at {self.student_code_file}")
+        if self.student_code_file.suffix.lower() == ".ipynb":
+            return _extract_notebook_code(self.student_code_file, self.notebook_cell_tag)
+        return self.student_code_file.read_text(encoding="utf-8")
+
     # TODO add functions that let instructors use the student fixture
     # use the stuff pete set up here: https://github.com/reteps/pytest-autograder-prototype
     def __repr__(self) -> str:
