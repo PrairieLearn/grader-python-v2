@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -7,6 +8,7 @@ from typing import cast
 import numpy as np
 import pandas as pd
 import pytest
+import scipy.sparse as sp
 import tomllib
 
 from pytest_prairielearn_grader.json_utils import from_json
@@ -111,6 +113,54 @@ def test_from_server_json_networkx_graph() -> None:
     assert set(graph.nodes) == {1, 2}
 
 
+_DENSE = np.array([[1.0, 0.0, 2.0], [0.0, 3.0, 0.0], [4.0, 0.0, 5.0]])
+_COMPLEX_DENSE = np.array([[1 + 2j, 0], [0, 3 - 1j]])
+
+
+@pytest.mark.parametrize(
+    "matrix",
+    [
+        sp.csr_matrix(_DENSE),
+        sp.csc_matrix(_DENSE),
+        sp.coo_matrix(_DENSE),
+        sp.csr_array(_DENSE),
+        sp.csc_array(_DENSE),
+        sp.coo_array(_DENSE),
+        sp.csr_matrix(_DENSE.astype(np.int64)),
+        sp.csr_matrix(_COMPLEX_DENSE),
+    ],
+    ids=lambda m: f"{m.format}_{'array' if isinstance(m, sp.sparray) else 'matrix'}_{m.dtype}",
+)
+def test_sparse_roundtrips_through_json(matrix: Any) -> None:
+    # json.dumps/loads exercises the actual sandbox-to-grader boundary, where
+    # the value is encoded as a JSON string and decoded on the grader side.
+    restored = from_json(json.loads(json.dumps(to_json(matrix))))
+
+    assert sp.issparse(restored)
+    assert restored.format == matrix.format
+    assert isinstance(restored, sp.sparray) == isinstance(matrix, sp.sparray)
+    assert restored.shape == matrix.shape
+    assert restored.dtype == matrix.dtype
+    np.testing.assert_array_equal(restored.toarray(), matrix.toarray())
+
+
+def test_sparse_csr_preserves_native_index_arrays() -> None:
+    matrix = sp.csr_matrix(_DENSE)
+    restored = from_json(json.loads(json.dumps(to_json(matrix))))
+
+    np.testing.assert_array_equal(restored.indices, matrix.indices)
+    np.testing.assert_array_equal(restored.indptr, matrix.indptr)
+    np.testing.assert_array_equal(restored.data, matrix.data)
+
+
+def test_sparse_other_format_roundtrips_as_coo() -> None:
+    lil = sp.lil_matrix(_DENSE)
+    restored = from_json(json.loads(json.dumps(to_json(lil))))
+
+    assert restored.format == "coo"
+    np.testing.assert_array_equal(restored.toarray(), lil.toarray())
+
+
 def test_optional_dependencies_are_declared() -> None:
     project = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())["project"]
     requirements = project["dependencies"]
@@ -126,7 +176,7 @@ import runpy
 from pathlib import Path
 import sys
 
-blocked = {"matplotlib", "networkx", "numpy", "pandas"}
+blocked = {"matplotlib", "networkx", "numpy", "pandas", "scipy"}
 original_import = builtins.__import__
 
 

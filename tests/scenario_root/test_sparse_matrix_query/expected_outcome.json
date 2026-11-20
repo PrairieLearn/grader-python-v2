@@ -1,0 +1,56 @@
+{
+  "expected_data_object": {
+    "score": 1.0,
+    "tests": [
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "query csr matrix",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_sparse_matrix_query.py::test_query_csr_matrix[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "query csc matrix",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_sparse_matrix_query.py::test_query_csc_matrix[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "query coo matrix",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_sparse_matrix_query.py::test_query_coo_matrix[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "query index arrays",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_sparse_matrix_query.py::test_query_preserves_index_arrays[student_code]"
+      },
+      {
+        "max_points": 1,
+        "message": "",
+        "name": "function returns sparse",
+        "outcome": "passed",
+        "points": 1.0,
+        "points_frac": 1.0,
+        "test_id": "test_sparse_matrix_query.py::test_function_returns_sparse[student_code]"
+      }
+    ]
+  },
+  "expected_outcome": {
+    "passed": 5,
+    "failed": 0
+  }
+}
