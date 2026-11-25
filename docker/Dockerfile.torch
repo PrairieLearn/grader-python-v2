@@ -1,0 +1,48 @@
+# Torch grader image.
+#
+# Unlike the lite/full images, this one uses a glibc (Debian) base instead of Alpine, because
+# PyTorch publishes only manylinux (glibc) wheels — there are no musl wheels to install on Alpine.
+# It is pinned to Python 3.13, the newest version with stable CPU torch wheels.
+#
+# https://docs.astral.sh/uv/guides/integration/docker/#available-images
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+
+# Needed to properly handle UTF-8
+ENV PYTHONIOENCODING=UTF-8
+ENV LANG=C.UTF-8
+
+WORKDIR /
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+    util-linux \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-full.txt requirements-torch.txt /
+ARG PACKAGE_VERSION=latest
+# Install the CPU-only torch build from the PyTorch index so the image doesn't pull the
+# multi-gigabyte CUDA packages. torchinfo and the grader itself come from PyPI.
+RUN uv venv --seed \
+    && uv pip install --no-cache-dir -r requirements-full.txt \
+    && uv pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch torchvision \
+    && uv pip install --no-cache-dir torchinfo \
+    && uv pip install --no-cache-dir pytest-prairielearn-grader==${PACKAGE_VERSION}
+
+# Create 'ag' user for privilege dropping in student code sandbox
+RUN adduser --disabled-password --gecos "" ag
+COPY --chmod=755 run.sh /run.sh
+
+# Add serverFilesCourse to Python path
+ENV PYTHONPATH=/grade/serverFilesCourse/
+
+# --- Baked-in defaults (all overridable per question) ---
+# Importing torch and running a model easily exceeds the 1-second default, so give questions more
+# head-room. A question can still set any value via sandbox_timeout in its ConfigObject.
+ENV PL_GRADER_SANDBOX_TIMEOUT=10
+# Keep the numeric libraries single-threaded by default for reproducible grading within the grader's
+# CPU budget. Student code can override this by setting the thread count itself.
+ENV OMP_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+
+ENTRYPOINT [ "/run.sh" ]

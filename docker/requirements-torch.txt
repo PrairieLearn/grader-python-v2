@@ -1,0 +1,12 @@
+# Extra packages for the torch image, on top of requirements-full.txt.
+#
+# torch and torchvision are installed from the PyTorch CPU index
+# (https://download.pytorch.org/whl/cpu) in Dockerfile.torch so that no CUDA packages are pulled.
+# torchinfo (the maintained successor to torchsummary, for model/parameter summaries) comes from
+# PyPI.
+#
+# Versions are intentionally left as floors for now; pin them before cutting a release once the
+# resolved CPU wheels have been validated in the image.
+torch>=2.4
+torchvision>=0.19
+torchinfo>=1.8

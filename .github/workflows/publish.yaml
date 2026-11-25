@@ -42,6 +42,10 @@ jobs:
             dockerfile: Dockerfile.lite
             latest_tag: lite
             version_suffix: "-lite"
+          - variant: torch
+            dockerfile: Dockerfile.torch
+            latest_tag: torch
+            version_suffix: "-torch"
     steps:
       - uses: actions/checkout@v4
         with:
