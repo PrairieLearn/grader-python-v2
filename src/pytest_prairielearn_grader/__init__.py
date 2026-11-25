@@ -10,6 +10,8 @@ from .assertions import assert_equal
 from .assertions import assert_false
 from .assertions import assert_fn_approx_equal
 from .assertions import assert_fn_equal
+from .assertions import assert_tensor_allclose
+from .assertions import assert_tensor_equal
 from .assertions import assert_true
 from .config import ConfigObject
 from .fixture import WorkspaceFixture
@@ -23,5 +25,7 @@ __all__ = [
     "assert_false",
     "assert_fn_approx_equal",
     "assert_fn_equal",
+    "assert_tensor_allclose",
+    "assert_tensor_equal",
     "assert_true",
 ]

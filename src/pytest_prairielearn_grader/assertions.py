@@ -369,3 +369,193 @@ def assert_fn_approx_equal(
     call_description = description or format_call(func_name, args, kwargs)
     assert_approx_equal(actual, expected, rtol=rtol, atol=atol, msg=msg, description=call_description)
     return actual
+
+
+# ---------------------------------------------------------------------------
+# PyTorch tensor assertions
+# ---------------------------------------------------------------------------
+
+
+def _as_cpu_tensor(value: Any) -> Any:
+    """Coerce a value to a detached CPU tensor so comparisons never touch autograd or a device."""
+    import torch  # noqa: PLC0415
+
+    return torch.as_tensor(value).detach().cpu()
+
+
+def _tensor_detail(value: Any) -> str:
+    """A short, student-readable description of a tensor's shape, dtype and (if small) values."""
+    tensor = _as_cpu_tensor(value)
+    dtype = str(tensor.dtype).removeprefix("torch.")
+    detail = f"a tensor with shape {tuple(tensor.shape)} and dtype {dtype}"
+    if tensor.numel() <= 12:
+        detail += f" and values {tensor.tolist()}"
+    return detail
+
+
+def assert_tensor_allclose(
+    actual: Any,
+    expected: Any,
+    *,
+    rtol: float = 1e-5,
+    atol: float = 1e-8,
+    check_dtype: bool = False,
+    equal_nan: bool = True,
+    msg: str | None = None,
+    description: str | None = None,
+) -> None:
+    """Assert two PyTorch tensors are equal within a tolerance.
+
+    Uses the formula ``|actual - expected| <= atol + rtol * |expected|`` elementwise.
+    ``actual`` and ``expected`` may be anything ``torch.as_tensor`` accepts (a tensor,
+    a NumPy array, or a nested list). Tensors are detached and moved to the CPU before
+    comparison, so gradients and device placement don't matter.
+
+    Parameters
+    ----------
+    actual:
+        The tensor produced by student code.
+    expected:
+        The correct / reference tensor.
+    rtol:
+        Relative tolerance (default ``1e-5``).
+    atol:
+        Absolute tolerance (default ``1e-8``).
+    check_dtype:
+        When True, the two tensors must also share a dtype. When False (default), an
+        integer tensor and the equivalent float tensor compare equal.
+    equal_nan:
+        When True (default), NaNs in matching positions compare equal.
+    msg:
+        Optional custom failure message.
+    description:
+        Optional label for the *Checking:* line.
+
+    Raises
+    ------
+    AssertionError
+        When the shapes differ, the dtypes differ (with ``check_dtype``), or the
+        values are not within tolerance.
+    """
+    import torch  # noqa: PLC0415
+
+    actual_tensor = _as_cpu_tensor(actual)
+    expected_tensor = _as_cpu_tensor(expected)
+
+    if actual_tensor.shape != expected_tensor.shape:
+        raise AssertionError(
+            _build_failure_lines(
+                expected=_tensor_detail(expected_tensor),
+                actual=_tensor_detail(actual_tensor),
+                description=description,
+                msg=msg or "The tensors have different shapes.",
+            )
+        )
+
+    if check_dtype and actual_tensor.dtype != expected_tensor.dtype:
+        raise AssertionError(
+            _build_failure_lines(
+                expected=_tensor_detail(expected_tensor),
+                actual=_tensor_detail(actual_tensor),
+                description=description,
+                msg=msg or "The tensors have different dtypes.",
+            )
+        )
+
+    target = torch.complex128 if (actual_tensor.is_complex() or expected_tensor.is_complex()) else torch.float64
+    actual_cast = actual_tensor.to(target)
+    expected_cast = expected_tensor.to(target)
+
+    if torch.allclose(actual_cast, expected_cast, rtol=rtol, atol=atol, equal_nan=equal_nan):
+        return
+
+    mismatches = ~torch.isclose(actual_cast, expected_cast, rtol=rtol, atol=atol, equal_nan=equal_nan)
+    num_mismatch = int(mismatches.sum().item())
+    abs_diff = (actual_cast - expected_cast).abs()
+    max_diff = float(torch.nan_to_num(abs_diff, nan=float("inf")).max().item()) if abs_diff.numel() else 0.0
+    default_msg = (
+        f"The tensors are not close enough (rtol={rtol}, atol={atol}): "
+        f"{num_mismatch} of {actual_tensor.numel()} elements differ, "
+        f"max absolute difference {max_diff:.3g}."
+    )
+    raise AssertionError(
+        _build_failure_lines(
+            expected=_tensor_detail(expected_tensor),
+            actual=_tensor_detail(actual_tensor),
+            description=description,
+            msg=msg or default_msg,
+        )
+    )
+
+
+def assert_tensor_equal(
+    actual: Any,
+    expected: Any,
+    *,
+    check_dtype: bool = False,
+    msg: str | None = None,
+    description: str | None = None,
+) -> None:
+    """Assert two PyTorch tensors are exactly equal.
+
+    Prefer this for integer, boolean, or index tensors where exact equality is meaningful;
+    use :func:`assert_tensor_allclose` for floating-point tensors. ``actual`` and ``expected``
+    may be anything ``torch.as_tensor`` accepts, and are detached and moved to the CPU before
+    comparison.
+
+    Parameters
+    ----------
+    actual:
+        The tensor produced by student code.
+    expected:
+        The correct / reference tensor.
+    check_dtype:
+        When True, the two tensors must also share a dtype (default False).
+    msg:
+        Optional custom failure message.
+    description:
+        Optional label for the *Checking:* line.
+
+    Raises
+    ------
+    AssertionError
+        When the shapes differ, the dtypes differ (with ``check_dtype``), or any
+        elements differ.
+    """
+    actual_tensor = _as_cpu_tensor(actual)
+    expected_tensor = _as_cpu_tensor(expected)
+
+    if actual_tensor.shape != expected_tensor.shape:
+        raise AssertionError(
+            _build_failure_lines(
+                expected=_tensor_detail(expected_tensor),
+                actual=_tensor_detail(actual_tensor),
+                description=description,
+                msg=msg or "The tensors have different shapes.",
+            )
+        )
+
+    if check_dtype and actual_tensor.dtype != expected_tensor.dtype:
+        raise AssertionError(
+            _build_failure_lines(
+                expected=_tensor_detail(expected_tensor),
+                actual=_tensor_detail(actual_tensor),
+                description=description,
+                msg=msg or "The tensors have different dtypes.",
+            )
+        )
+
+    elementwise_equal = actual_tensor == expected_tensor
+    if bool(elementwise_equal.all()):
+        return
+
+    num_mismatch = int((~elementwise_equal).sum().item())
+    default_msg = f"The tensors are not equal: {num_mismatch} of {actual_tensor.numel()} elements differ."
+    raise AssertionError(
+        _build_failure_lines(
+            expected=_tensor_detail(expected_tensor),
+            actual=_tensor_detail(actual_tensor),
+            description=description,
+            msg=msg or default_msg,
+        )
+    )

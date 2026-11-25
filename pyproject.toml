@@ -37,7 +37,18 @@ dev = [
     "networkx",
     "types-networkx",
     "nbformat>=5.0",
+    "torch>=2.0",
 ]
+
+[tool.uv.sources]
+# Use the CPU-only PyTorch wheels on Linux so CI (and the grader images) don't pull the
+# multi-gigabyte CUDA build. macOS/Windows fall back to the default index, which is CPU-only.
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning"]
