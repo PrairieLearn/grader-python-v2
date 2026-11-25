@@ -37,7 +37,9 @@ dev = [
     "networkx",
     "types-networkx",
     "nbformat>=5.0",
-    "torch>=2.0",
+    # Gated below 3.14 because PyTorch doesn't publish wheels for 3.14 yet; the torch tests
+    # skip themselves when torch isn't installed (e.g. on the 3.14 CI job).
+    "torch>=2.0; python_version < '3.14'",
 ]
 
 [tool.uv.sources]

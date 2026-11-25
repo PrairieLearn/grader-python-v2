@@ -3,14 +3,19 @@
 torch is an optional, heavy dependency, so these tests are skipped when it isn't installed.
 """
 
+from typing import TYPE_CHECKING
+
 import pytest
 
-torch = pytest.importorskip("torch")
+if TYPE_CHECKING:
+    import torch
+else:
+    torch = pytest.importorskip("torch")
 
-from pytest_prairielearn_grader.assertions import assert_tensor_allclose  # noqa: E402
-from pytest_prairielearn_grader.assertions import assert_tensor_equal  # noqa: E402
-from pytest_prairielearn_grader.json_utils import from_json  # noqa: E402
-from pytest_prairielearn_grader.json_utils import to_json  # noqa: E402
+from pytest_prairielearn_grader.assertions import assert_tensor_allclose
+from pytest_prairielearn_grader.assertions import assert_tensor_equal
+from pytest_prairielearn_grader.json_utils import from_json
+from pytest_prairielearn_grader.json_utils import to_json
 
 # ---------------------------------------------------------------------------
 # Serialization round-trips
