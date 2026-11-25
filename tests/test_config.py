@@ -3,7 +3,9 @@
 import pytest
 
 from pytest_prairielearn_grader import ConfigObject
+from pytest_prairielearn_grader.plugin import DEFAULT_SANDBOX_TIMEOUT
 from pytest_prairielearn_grader.plugin import _calculate_summary_scores
+from pytest_prairielearn_grader.plugin import _default_sandbox_timeout
 
 # ---------------------------------------------------------------------------
 # Valid configurations
@@ -13,8 +15,25 @@ from pytest_prairielearn_grader.plugin import _calculate_summary_scores
 def test_default_config() -> None:
     config = ConfigObject()
     assert config.workspace_mode is False
-    assert config.sandbox_timeout == 1.0
+    # None means "defer to the image/global default"; it is resolved at grading time.
+    assert config.sandbox_timeout is None
     assert config.student_code_pattern == "student_code*.py"
+
+
+def test_default_sandbox_timeout_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PL_GRADER_SANDBOX_TIMEOUT", raising=False)
+    assert _default_sandbox_timeout() == DEFAULT_SANDBOX_TIMEOUT
+
+
+def test_default_sandbox_timeout_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PL_GRADER_SANDBOX_TIMEOUT", "12.5")
+    assert _default_sandbox_timeout() == 12.5
+
+
+@pytest.mark.parametrize("bad_value", ["not-a-number", "0", "-3"])
+def test_default_sandbox_timeout_ignores_invalid_env(monkeypatch: pytest.MonkeyPatch, bad_value: str) -> None:
+    monkeypatch.setenv("PL_GRADER_SANDBOX_TIMEOUT", bad_value)
+    assert _default_sandbox_timeout() == DEFAULT_SANDBOX_TIMEOUT
 
 
 def test_single_file_mode_full() -> None:

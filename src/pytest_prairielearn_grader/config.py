@@ -53,10 +53,14 @@ class ConfigObject:
         ```
     """
 
-    sandbox_timeout: float = 1.0
+    sandbox_timeout: float | None = None
     """Timeout in seconds for sandbox initialization and operations.
 
-    Must be a positive number. Default is 1.0 second.
+    Must be a positive number when set. When None (the default), the timeout falls back to the
+    grader image's default, which an image can set with the ``PL_GRADER_SANDBOX_TIMEOUT``
+    environment variable (e.g. the torch image raises it to accommodate model work), and
+    otherwise to 1.0 second. Setting an explicit value here always overrides the image default.
+
     This timeout applies to both sandbox initialization and individual student code operations.
     """
 
@@ -271,7 +275,7 @@ class ConfigObject:
     def __post_init__(self) -> None:
         """Validate configuration values after initialization."""
         # Validate sandbox_timeout
-        if self.sandbox_timeout <= 0:
+        if self.sandbox_timeout is not None and self.sandbox_timeout <= 0:
             raise ValueError(f"sandbox_timeout must be positive, got {self.sandbox_timeout}")
 
         # Validate import_whitelist contains non-empty strings

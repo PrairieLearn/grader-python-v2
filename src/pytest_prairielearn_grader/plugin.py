@@ -37,6 +37,32 @@ logger = logging.getLogger(__name__)
 # Default configuration constants
 DEFAULT_SANDBOX_TIMEOUT = 1.0
 DEFAULT_IMPORT_BLACKLIST = ["os", "sys", "subprocess", "pathlib", "shutil"]
+# A grader image can raise the default sandbox timeout through this environment variable. Per-question
+# configuration always overrides it, so questions can still set a lower (or higher) value.
+ENV_DEFAULT_SANDBOX_TIMEOUT = "PL_GRADER_SANDBOX_TIMEOUT"
+
+
+def _default_sandbox_timeout() -> float:
+    """The sandbox timeout used when a question doesn't set one.
+
+    Reads ``PL_GRADER_SANDBOX_TIMEOUT`` so an image (such as the torch image, where importing the
+    framework and running a model easily exceeds a second) can bake in a more sensible default.
+    Falls back to ``DEFAULT_SANDBOX_TIMEOUT`` when the variable is unset or invalid.
+    """
+    raw = os.environ.get(ENV_DEFAULT_SANDBOX_TIMEOUT)
+    if raw is None:
+        return DEFAULT_SANDBOX_TIMEOUT
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r; using %s", ENV_DEFAULT_SANDBOX_TIMEOUT, raw, DEFAULT_SANDBOX_TIMEOUT)
+        return DEFAULT_SANDBOX_TIMEOUT
+    if value <= 0:
+        logger.warning("Ignoring non-positive %s=%r; using %s", ENV_DEFAULT_SANDBOX_TIMEOUT, raw, DEFAULT_SANDBOX_TIMEOUT)
+        return DEFAULT_SANDBOX_TIMEOUT
+    return value
+
+
 # Failing subtests shown in a test's message. The rest are only counted, to keep the message readable.
 MAX_SHOWN_SUBTEST_FAILURES = 5
 
@@ -321,7 +347,7 @@ def _resolve_sandbox_config(
     when there's no ConfigObject), merges them with the ConfigObject taking precedence, and injects
     the names_for_user values into starting_vars.
     """
-    initialization_timeout: float = DEFAULT_SANDBOX_TIMEOUT
+    initialization_timeout: float = _default_sandbox_timeout()
 
     if data_json is None:
         params_dict = {}
@@ -341,8 +367,10 @@ def _resolve_sandbox_config(
             pytest.fail(f"autograder_config must be a ConfigObject instance, got {type(config_object).__name__}")
         logger.debug("Using module-level autograder_config - overriding all other configuration sources")
         config_dict = config_object.to_dict()
-        # Handle timeout and starting_vars separately as they're not in to_dict()
-        initialization_timeout = config_object.sandbox_timeout
+        # Handle timeout and starting_vars separately as they're not in to_dict().
+        # A None timeout means "use the image/global default" computed above.
+        if config_object.sandbox_timeout is not None:
+            initialization_timeout = config_object.sandbox_timeout
         config_starting_vars = config_object.starting_vars
         helper_module_names = config_object.helper_modules
         data_file_names = config_object.data_files
