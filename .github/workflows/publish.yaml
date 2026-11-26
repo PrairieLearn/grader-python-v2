@@ -32,6 +32,7 @@ jobs:
     permissions:
       contents: read
     strategy:
+      # Keep this image list in sync with the build-only matrix in docker-build.yaml.
       matrix:
         include:
           - variant: full
