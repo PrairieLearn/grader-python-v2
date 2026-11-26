@@ -192,7 +192,7 @@ mypy src/
 
 - `prairielearn/grader-python-pytest:latest` — full image with numpy, pandas, matplotlib, sympy
 - `prairielearn/grader-python-pytest:lite` — minimal image with core dependencies only
-- `prairielearn/grader-python-pytest:torch` — full image plus a CPU build of PyTorch, torchvision, and torchinfo. See [torch.md](torch.md).
+- `prairielearn/grader-python-pytest:torch` — full image plus a CPU build of PyTorch, torchvision, and torchinfo. See the [PyTorch grading](quick_start.md#pytorch-grading) section of the quick start guide.
 
 ## Related Issues
 
