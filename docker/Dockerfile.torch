@@ -19,14 +19,17 @@ RUN apt-get update \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements-full.txt requirements-torch.txt /
+COPY requirements-torch.txt /
 ARG PACKAGE_VERSION=latest
-# Install the CPU-only torch build from the PyTorch index so the image doesn't pull the
-# multi-gigabyte CUDA packages. torchinfo and the grader itself come from PyPI.
+# Install everything from one self-contained, pinned requirements file. The PyTorch CPU index is the
+# primary index, so torch/torchvision resolve to CPU-only wheels (no multi-gigabyte CUDA packages);
+# every other package falls through to PyPI. uv's default first-index strategy keeps that routing
+# safe because the PyTorch index hosts only torch packages.
 RUN uv venv --seed \
-    && uv pip install --no-cache-dir -r requirements-full.txt \
-    && uv pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch torchvision \
-    && uv pip install --no-cache-dir torchinfo \
+    && uv pip install --no-cache-dir \
+    --index-url https://download.pytorch.org/whl/cpu \
+    --extra-index-url https://pypi.org/simple \
+    -r requirements-torch.txt \
     && uv pip install --no-cache-dir pytest-prairielearn-grader==${PACKAGE_VERSION}
 
 # Create 'ag' user for privilege dropping in student code sandbox
