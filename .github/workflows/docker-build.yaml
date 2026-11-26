@@ -1,0 +1,66 @@
+name: Docker build
+
+# Validates that the grader images actually build, without publishing anything. The publish
+# workflow only runs on a release tag, so without this a broken dependency combination (for example
+# a torch/numpy pin that doesn't resolve) wouldn't surface until release time.
+#
+# Builds are amd64-only and never pushed. Per-variant layer caching keeps unchanged images close to
+# instant, so a change to one image's files doesn't pay to rebuild the others from scratch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docker/**"
+      - ".github/workflows/docker-build.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "docker/**"
+      - ".github/workflows/docker-build.yaml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: lite
+            dockerfile: Dockerfile.lite
+          - variant: full
+            dockerfile: Dockerfile
+          - variant: torch
+            dockerfile: Dockerfile.torch
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve latest published grader version
+        id: pkg
+        run: |
+          VERSION=$(curl -fsSL https://pypi.org/pypi/pytest-prairielearn-grader/json \
+            | python3 -c "import sys, json; print(json.load(sys.stdin)['info']['version'])")
+          if [ -z "$VERSION" ]; then
+            echo "Could not resolve grader version from PyPI" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build ${{ matrix.variant }} image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./docker
+          file: ./docker/${{ matrix.dockerfile }}
+          push: false
+          # amd64 only: this validates the dependency resolution (the real risk) without paying for a
+          # second architecture. arm64 wheels resolve the same way and can be added if needed.
+          platforms: linux/amd64
+          build-args: |
+            PACKAGE_VERSION=${{ steps.pkg.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
