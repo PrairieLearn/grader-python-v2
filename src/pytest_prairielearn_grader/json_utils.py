@@ -61,6 +61,18 @@ def to_json(v: Any) -> Any:
 
         if is_plot(v):
             return plot_to_json(v)
+    elif module == "torch":
+        import torch
+
+        if isinstance(v, torch.Tensor):
+            # Detach from any autograd graph and move to CPU so the tensor serializes
+            # whether or not it carries gradients or lives on an accelerator.
+            detached = v.detach().cpu()
+            return {
+                "_type": "torch_tensor",
+                "_value": detached.tolist(),
+                "_dtype": str(detached.dtype).removeprefix("torch."),
+            }
     else:
         return v
 
@@ -158,6 +170,13 @@ def from_json(v_json) -> Any:
                 raise ValueError("variable of type matplotlib_figure should have value")
         elif v_json["_type"] == "sparse":
             return _sparse_from_json(v_json)
+        elif v_json["_type"] == "torch_tensor":
+            import torch
+
+            if "_value" not in v_json:
+                raise ValueError("variable of type torch_tensor should have value")
+            dtype = getattr(torch, v_json["_dtype"]) if "_dtype" in v_json else None
+            return torch.tensor(v_json["_value"], dtype=dtype)
         else:
             raise ValueError("variable has unknown type {}".format(v_json["_type"]))
     return v_json

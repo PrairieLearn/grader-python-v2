@@ -37,7 +37,20 @@ dev = [
     "networkx",
     "types-networkx",
     "nbformat>=5.0",
+    # Gated below 3.14 because PyTorch doesn't publish wheels for 3.14 yet; the torch tests
+    # skip themselves when torch isn't installed (e.g. on the 3.14 CI job).
+    "torch>=2.0; python_version < '3.14'",
 ]
+
+[tool.uv.sources]
+# Use the CPU-only PyTorch wheels on Linux so CI (and the grader images) don't pull the
+# multi-gigabyte CUDA build. macOS/Windows fall back to the default index, which is CPU-only.
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning"]
