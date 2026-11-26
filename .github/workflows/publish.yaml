@@ -32,6 +32,7 @@ jobs:
     permissions:
       contents: read
     strategy:
+      # Keep this image list in sync with the build-only matrix in docker-build.yaml.
       matrix:
         include:
           - variant: full
@@ -42,6 +43,10 @@ jobs:
             dockerfile: Dockerfile.lite
             latest_tag: lite
             version_suffix: "-lite"
+          - variant: torch
+            dockerfile: Dockerfile.torch
+            latest_tag: torch
+            version_suffix: "-torch"
     steps:
       - uses: actions/checkout@v4
         with:
