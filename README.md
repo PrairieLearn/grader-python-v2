@@ -81,6 +81,8 @@ Available helpers:
 - `assert_fn_approx_equal(sandbox, func_name, args=..., expected=...)` — call + approx compare
 - `assert_true(condition)` / `assert_false(condition)` — boolean checks
 - `assert_plot_equal(plot, expected)` — compare a matplotlib plot with a reference plot
+- `assert_tensor_allclose(actual, expected, rtol=1e-5, atol=1e-8)` — compare PyTorch tensors within a tolerance (torch image)
+- `assert_tensor_equal(actual, expected)` — compare PyTorch tensors exactly (torch image)
 
 ### Partial Credit Across Inputs
 
@@ -190,6 +192,7 @@ mypy src/
 
 - `prairielearn/grader-python-pytest:latest` — full image with numpy, pandas, matplotlib, sympy
 - `prairielearn/grader-python-pytest:lite` — minimal image with core dependencies only
+- `prairielearn/grader-python-pytest:torch` — full image plus a CPU build of PyTorch, torchvision, and torchinfo. See the [PyTorch grading](quick_start.md#pytorch-grading) section of the quick start guide.
 
 ## Related Issues
 
