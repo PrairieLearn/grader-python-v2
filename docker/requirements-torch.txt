@@ -1,0 +1,44 @@
+# Self-contained, fully pinned dependency set for the torch grader image.
+#
+# This image is NOT built on top of requirements-full.txt: it carries its own copy of the scientific
+# stack so its build is reproducible and can pin versions independently of the full image. PyTorch is
+# tightly coupled to specific numpy/Pillow versions, and this image runs on a different Python and
+# libc (glibc / 3.13) than the full image (musl / 3.14), so it needs to pin those on its own terms.
+#
+# Trade-off: when a package is added to the full image it must be mirrored here by hand; that drift is
+# intentional, so that changes to this heavy ML image are always explicit and reviewed.
+#
+# torch and torchvision are served from the PyTorch CPU index (https://download.pytorch.org/whl/cpu),
+# which Dockerfile.torch sets as the primary index so only CPU wheels are pulled (no CUDA). Every
+# other package falls through to PyPI. torchinfo (the maintained successor to torchsummary, for
+# model/parameter summaries) comes from PyPI.
+
+# --- Scientific stack (kept in sync with the full image, pinned independently) ---
+beautifulsoup4==4.15.0
+defusedxml==0.7.1
+Faker==40.44.0
+matplotcheck2==0.2.1
+matplotlib==3.11.2
+nbformat==5.11.1
+networkx==3.7
+nltk==3.10.4
+numpy==2.5.4
+openpyxl==3.1.5
+pandas==3.1.0
+Pillow==13.0.0
+PuLP==4.2.0
+Pygments==2.21.0
+pytest==9.2.0
+requests==2.34.2
+scikit-learn==1.9.1
+scipy==1.18.1
+seaborn==0.13.2
+sympy==1.14.0
+typing-extensions==4.16.0
+
+# --- Torch stack (CPU wheels from the PyTorch index; torchinfo from PyPI) ---
+# These exact versions are provisional until a torch image build validates that the CPU wheels
+# resolve against the pinned numpy/Pillow above. Bump them once that build is green.
+torch==2.8.0
+torchvision==0.23.0
+torchinfo==1.8.0
